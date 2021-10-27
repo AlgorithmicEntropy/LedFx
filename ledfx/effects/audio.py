@@ -782,7 +782,12 @@ class AudioReactiveEffect(Effect):
 
     def _audio_data_updated(self):
         if self.is_active:
-            self.audio_data_updated(self.audio)
+            try:
+                self.audio_data_updated(self.audio)
+            except Exception as e:
+                # catch pixel not ready exception for now
+                _LOGGER.exception(e)
+                pass
 
     def audio_data_updated(self, data):
         """

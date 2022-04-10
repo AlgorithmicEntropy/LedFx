@@ -1,4 +1,4 @@
-from ledfx.color import COLORS
+from ledfx.color import parse_color, validate_color
 from ledfx.effects.audio import AudioReactiveEffect
 from ledfx.effects.matrix_effect import ORIENTATION, MatrixEffect
 import voluptuous as vol
@@ -22,17 +22,17 @@ class MatrixBars(AudioReactiveEffect, MatrixEffect):
                 "color_lows",
                 description="Color of low, bassy sounds",
                 default="red",
-            ): vol.In(list(COLORS.keys())),
+            ): validate_color,
             vol.Optional(
                 "color_mids",
                 description="Color of mids",
                 default="green",
-            ): vol.In(list(COLORS.keys())),
+            ): validate_color,
             vol.Optional(
                 "color_highs",
                 description="Color of highs",
                 default="blue",
-            ): vol.In(list(COLORS.keys())),
+            ): validate_color,
             vol.Optional(
                 "orientation",
                 description="Orientation of the effect",
@@ -52,9 +52,9 @@ class MatrixBars(AudioReactiveEffect, MatrixEffect):
         # TODO handle orientations
         self._height = math.floor(config["matrix_height"] / 3)
         self._decay = config["decay"]
-        self._color_lows = COLORS[config["color_lows"]]
-        self._color_mids = COLORS[config["color_mids"]]
-        self._color_highs = COLORS[config["color_highs"]]
+        self._color_lows = parse_color(config["color_lows"])
+        self._color_mids = parse_color(config["color_mids"])
+        self._color_highs = parse_color(config["color_highs"])
 
         self._multiplier = 1.6 - self._config["blur"] / 17
 
@@ -119,4 +119,4 @@ class MatrixBars(AudioReactiveEffect, MatrixEffect):
                 start = start+width
                 p[start - intensity[2] : start] = self._color_highs
         # Update the pixel values
-        return p
+        self.pixels = p

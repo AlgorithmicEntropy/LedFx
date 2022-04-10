@@ -1,4 +1,4 @@
-from ledfx.color import COLORS
+from ledfx.color import parse_color, validate_color
 from ledfx.effects.audio import AudioReactiveEffect
 from ledfx.effects.matrix_effect import ORIENTATION, MatrixEffect
 import numpy as np
@@ -26,17 +26,12 @@ class MatrixCurve(AudioReactiveEffect, MatrixEffect):
                 "color_start",
                 description="Gradient start",
                 default="red",
-            ): vol.In(list(COLORS.keys())),
+            ): validate_color,
             vol.Optional(
                 "color_end",
                 description="Gradient end",
                 default="green",
-            ): vol.In(list(COLORS.keys())),
-            vol.Optional(
-                "color_background",
-                description="Background color",
-                default="black",
-            ): vol.In(list(COLORS.keys())),
+            ): validate_color,
         }
     )
 
@@ -51,9 +46,8 @@ class MatrixCurve(AudioReactiveEffect, MatrixEffect):
         self._height = self._config["matrix_height"]
         self._width = self._config["matrix_width"]
         self._amplitude_buffer = np.zeros(self._width)
-        self._start_color = self._config["color_start"]
-        self._end_color = self._config["color_end"]
-        self._bg_color = COLORS[self._config["color_background"]]
+        self._start_color = parse_color(self._config["color_start"])
+        self._end_color = parse_color(self._config["color_end"])
 
         self.gen_gradient(self._start_color, self._end_color);
 
@@ -87,7 +81,6 @@ class MatrixCurve(AudioReactiveEffect, MatrixEffect):
 
         # Update the pixel values
         self.pixels = p
-        return p
 
     
     def _update_amplitudes(self, new_amplitudes):
@@ -98,9 +91,6 @@ class MatrixCurve(AudioReactiveEffect, MatrixEffect):
         return amplitudes
 
     def gen_gradient(self, start_color, end_color):
-        start_color = COLORS[start_color]
-        end_color = COLORS[end_color]
-
         r = [np.interp(i, (0, self._height), (start_color[0], end_color[0])) for i in range(0, self._height)]
         g = [np.interp(i, (0, self._height), (start_color[1], end_color[1])) for i in range(0, self._height)]
         b = [np.interp(i, (0, self._height), (start_color[2], end_color[2])) for i in range(0, self._height)]

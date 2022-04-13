@@ -1,5 +1,11 @@
 from ledfx.effects import Effect
 import voluptuous as vol
+import numpy as np
+
+ORIENTATION = {
+    "vertical": 0,
+    "horizontal": 1
+}
 
 @Effect.no_registration
 class MatrixEffect(Effect):
@@ -20,8 +26,3 @@ class MatrixEffect(Effect):
             ): vol.All(vol.Coerce(int)),
         }
     )
-
-ORIENTATION = {
-    "vertical": 0,
-    "horizontal": 1
-}

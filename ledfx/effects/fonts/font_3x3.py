@@ -287,8 +287,15 @@ class Font3x3:
             [0,0,0],
         ])
 
+        chars['%'] = np.array([
+            [1,0,1],
+            [0,1,0],
+            [1,0,1],
+        ])
+
+
         for key in chars:
-            chars[key] = np.flip(chars[key], (0))
+            chars[key] = np.flip(chars[key], (0, 1))
 
         self.chars = chars
 

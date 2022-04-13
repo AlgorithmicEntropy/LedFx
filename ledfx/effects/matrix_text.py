@@ -55,21 +55,20 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
         self._font = Font3x3()
         self._height = config["matrix_height"]
         self._width = config["matrix_width"]
-        self._text = config['text']
         self._font_color = parse_color(config['font_color'])
         self._scroll_speed = config['scroll_speed']
         self._y_ofsett = config['y_ofsett']
-
         self.bass_strobe_enabled = config['bass_strobe']
         self.bass_strobe_color = parse_color(config['bass_strobe_color'])
         self.last_bass_strobe_time = 0
         self.bass_strobe_wait_time = 0.2
 
         # create text buffer
-        self._x_start = self._width - 1
+        self._text = config['text']
+        self._x_start = 0
         text_len = len(self._text)
         rendered_len = text_len * 3 + text_len - 1
-        self.text_pos = rendered_len
+        self.text_pos = rendered_len - 1
 
         text_arr = np.zeros((3, rendered_len))
         word_idx = rendered_len - 3
@@ -105,13 +104,13 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
             if self.text_pos != 0:
                 self.text_pos -= 1
 
-            self._x_start -= 1
-            if self._x_start <= 0:
-                self._x_start = self._width - 1
-                #self.text_pos = len(self._text) * 3 + len(self._text) - 1
+            if self.text_pos == 0:
+                self._x_start += 1
+            if self._x_start > self._width:
+                self._x_start = 0
+                self.text_pos = self._text_buff.shape[1]
 
-        #self._render_text(p, self._text, self._x_start, self._y_ofsett)
-        self._stack_arrays(p, self._text_buff[:,self.text_pos:], self._x_start, self._y_ofsett)
+        self.color_stack_arr(p,  self._text_buff[:,self.text_pos:], self._x_start, self._y_ofsett)
 
         # flip rows
         for i in range(0, self._height):
@@ -121,19 +120,13 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
         self.pixels = np.reshape(p, (len(self.pixels), 3))
         self._frame_counter += 1     
 
-    def _stack_arrays(self, m, mask, x_0, y_0):
-        y = y_0
-        while y - y_0 < len(mask) and y < self._height:
-            x = x_0
-            while x_0 - x < len(mask[0]):
-                if mask[y - y_0, x_0 - x] == 1:
-                    if self._is_beat and self.bass_strobe_enabled:
-                        m[y, x] = self.bass_strobe_color
-                    else:
-                        m[y, x] = self._font_color
-                x -= 1
-            y += 1 
-
+    def color_stack_arr(self, arr, mask, x0, y0):
+        color_mask = np.zeros(mask.shape + (3,))
+        color_mask[mask == 1] = self._font_color
+        y_max = min(arr.shape[0], y0 + mask.shape[0])
+        x_max = min(arr.shape[1], x0 + mask.shape[1])
+        arr[y0: y_max, x0 : x_max] = color_mask[:y_max - y0, :x_max - x0]
+        
 
     def _add_color_mask(self, m, mask, x_0):
         m[:, x_0:x_0+len(mask[0])] = mask

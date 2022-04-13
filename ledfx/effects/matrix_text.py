@@ -4,6 +4,7 @@ from ledfx.effects.matrix_effect import ORIENTATION, MatrixEffect
 import numpy as np
 import voluptuous as vol
 from ledfx.effects.fonts.font_3x3 import Font3x3
+from ledfx.effects.fonts.font_5x5 import Font5x5
 from .fonts.font_3x3 import Font3x3
 import time
 
@@ -43,6 +44,11 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
                 description="Enable bass strobe",
                 default=False
             ): bool,
+            vol.Optional(
+                "matrix_font_style",
+                description="Font Style",
+                default = '3x3',
+            ): vol.All(vol.Coerce(str), vol.In(['3x3', '5x5'])),
         }
     )
 
@@ -52,7 +58,13 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
 
     def config_updated(self, config):
         # TODO maybe move to ctor (font needs to exist to calc buffer)
-        self._font = Font3x3()
+        font_style = config['matrix_font_style']
+        if font_style == '3x3':
+            self._font = Font3x3()
+            self._font_size = 3
+        else:
+            self._font = Font5x5()
+            self._font_size = 5
         self._height = config["matrix_height"]
         self._width = config["matrix_width"]
         self._font_color = parse_color(config['font_color'])
@@ -67,18 +79,18 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
         self._text = config['text']
         self._x_start = 0
         text_len = len(self._text)
-        rendered_len = text_len * 3 + text_len - 1
+        rendered_len = text_len * self._font_size + text_len - 1
         self.text_pos = rendered_len - 1
 
-        text_arr = np.zeros((3, rendered_len))
-        word_idx = rendered_len - 3
+        text_arr = np.zeros((self._font_size, rendered_len))
+        word_idx = rendered_len - self._font_size
         for char in self._text.upper():
             if char in self._font.chars:
                 self._add_color_mask(text_arr, self._font.chars[char], word_idx)
             else:
                 # for now display empty
                 self._add_color_mask(text_arr, self._font.chars[' '], word_idx)
-            word_idx -= 4
+            word_idx -= self._font_size + 1
         self._text_buff = text_arr
 
     def audio_data_updated(self, data):

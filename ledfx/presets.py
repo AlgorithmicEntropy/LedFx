@@ -1476,4 +1476,7 @@ ledfx_presets = {
     "pitchSpectrum": {"reset": {"config": {}, "name": "Reset"}},
     "power": {"reset": {"config": {}, "name": "Reset"}},
     "spectrum": {"reset": {"config": {}, "name": "Reset"}},
+    "matrix_curve": {"reset": {"config": {}, "name": "Reset"}},
+    'matrix_bars': {"reset": {"config": {}, "name": "Reset"}},
+    'matrix_text': {"reset": {"config": {}, "name": "Reset"}},
 }

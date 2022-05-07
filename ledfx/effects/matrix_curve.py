@@ -15,12 +15,12 @@ class MatrixCurve(AudioReactiveEffect, MatrixEffect):
             vol.Optional(
                 "decay",
                 description="Column Decay",
-                default="0.1",
+                default="0.5",
             ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=0.99)),
             vol.Optional(
                 "gain",
                 description="Column Gain",
-                default="0.5",
+                default="0.7",
             ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=0.99)),
             vol.Optional(
                 "color_start",

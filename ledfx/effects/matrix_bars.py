@@ -1,6 +1,6 @@
 from ledfx.color import parse_color, validate_color
 from ledfx.effects.audio import AudioReactiveEffect
-from ledfx.effects.matrix_effect import ORIENTATION, MatrixEffect
+from ledfx.effects.matrix_effect import Orientation, MatrixEffect
 import voluptuous as vol
 import numpy as np
 import math
@@ -37,7 +37,7 @@ class MatrixBars(AudioReactiveEffect, MatrixEffect):
                 "orientation",
                 description="Orientation of the effect",
                 default="horizontal",
-            ): vol.In(list(ORIENTATION.keys())),
+            ): vol.In(Orientation),
         }
     )
 

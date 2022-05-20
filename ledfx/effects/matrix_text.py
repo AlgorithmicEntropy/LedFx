@@ -1,6 +1,6 @@
 from ledfx.color import parse_color, validate_color
 from ledfx.effects.audio import AudioReactiveEffect
-from ledfx.effects.matrix_effect import ORIENTATION, MatrixEffect
+from ledfx.effects.matrix_effect import MatrixEffect
 import numpy as np
 import voluptuous as vol
 from ledfx.effects.fonts.font_3x3 import Font3x3

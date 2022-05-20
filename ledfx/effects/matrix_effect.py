@@ -1,11 +1,11 @@
 from ledfx.effects import Effect
 import voluptuous as vol
 import numpy as np
+from enum import Enum
 
-ORIENTATION = {
-    "vertical": 0,
-    "horizontal": 1
-}
+class Orientation(str, Enum):
+    VERTICAL = "vertical",
+    HORIZONTAL = "horizontal"
 
 @Effect.no_registration
 class MatrixEffect(Effect):
@@ -24,5 +24,10 @@ class MatrixEffect(Effect):
                 description="Height of the matrix",
                 default=12,
             ): vol.All(vol.Coerce(int)),
+            vol.Required(
+                "matrix_orientation",
+                description="Matrix orientation",
+                default=Orientation.HORIZONTAL,
+            ): vol.In([i.value for i in Orientation]),
         }
     )

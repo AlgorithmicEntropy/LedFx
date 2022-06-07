@@ -57,6 +57,7 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
         self._is_beat = False
 
     def config_updated(self, config):
+        super().config_updated(config)
         # TODO maybe move to ctor (font needs to exist to calc buffer)
         font_style = config['matrix_font_style']
         if font_style == '3x3':
@@ -65,8 +66,6 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
         else:
             self._font = Font5x5()
             self._font_size = 5
-        self._height = config["matrix_height"]
-        self._width = config["matrix_width"]
         self._font_color = parse_color(config['font_color'])
         self._scroll_speed = config['scroll_speed']
         self._y_ofsett = config['y_ofsett']

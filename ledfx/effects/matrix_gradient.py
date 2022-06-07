@@ -119,11 +119,16 @@ class MatrixGradientEffect(MatrixEffect):
         self._gradient_curve = gradient.T
 
     def _assert_gradient(self):
-        if (self._gradient_curve is None):  # Uninitialized gradient
-            if self._config["gradient_orientation"] == Orientation.HORIZONTAL:
-                gradient_len = self._config["matrix_width"]
-            else:
-                gradient_len = self._config["matrix_height"]
+        
+        if self._config["gradient_orientation"] == Orientation.HORIZONTAL:
+            gradient_len = self._config["matrix_width"]
+        else:
+            gradient_len = self._config["matrix_height"]
+
+        if (
+            self._gradient_curve is None  # Uninitialized gradient
+            or self._gradient_curve.shape[1] != gradient_len  # incorrect shape
+            ):
             self._generate_gradient_curve(
                 self._config["gradient"],
                 gradient_len,
@@ -147,12 +152,19 @@ class MatrixGradientEffect(MatrixEffect):
 
     def get_gradient_color(self, point):
         self._assert_gradient()
-
-        return self._gradient_curve[:, point]
+        # TODO fix index error sometimes after config change
+        # Maybe race condition render frame vs change config?
+        try:
+            return self._gradient_curve[:, point]
+        except IndexError:
+            return [0, 0, 0]  # worst workaround possible..
 
     def config_updated(self, config):
+        super().config_updated(config)
         """Invalidate the gradient"""
         self._gradient_curve = None
+        self._gradient_orientation = self._config["gradient_orientation"]
+
 
     def apply_gradient(self, y):
         self._assert_gradient()

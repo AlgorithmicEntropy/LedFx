@@ -30,14 +30,12 @@ class MatrixCurve(AudioReactiveEffect, MatrixGradientEffect):
         self.r = np.zeros(self._width)
 
     def config_updated(self, config):
+        super().config_updated(config)
         # Create the filters used for the effect
-        decay = self._config["decay"]
-        gain = self._config["gain"]
+        decay = config["decay"]
+        gain = config["gain"]
         self._r_filter = self.create_filter(alpha_decay=decay, alpha_rise=gain)
-        self._height = self._config["matrix_height"]
-        self._width = self._config["matrix_width"]
         self._amplitude_buffer = np.zeros(self._width)
-        self._gradient_orientation = self._config["gradient_orientation"]
 
     def audio_data_updated(self, data):
         self.r = self.melbank(filtered=True, size=self._width)
@@ -54,7 +52,7 @@ class MatrixCurve(AudioReactiveEffect, MatrixGradientEffect):
             for row in range(0, self._height):
                 start = self._width * row
                 end = start + self._width
-                array = np.array([self.get_gradient_color(row) if amplitudes[i] >= row+1 else self._bg_color for i in range(0, self._width)])
+                array = np.array([self.get_gradient_color(row) if amplitudes[i] > row+1 else self._bg_color for i in range(0, self._width)])
                 if row % 2 == 0:
                     self.pixels[start:end] = array
                 else:
@@ -63,7 +61,7 @@ class MatrixCurve(AudioReactiveEffect, MatrixGradientEffect):
             # TODO optimize horizontal gradient
             p = np.zeros((self._width, self._height, 3))
             for col in range(0, self._width):
-                array = np.array([self.get_gradient_color(col) if amplitudes[col] >= i else self._bg_color for i in range(0, self._height)])
+                array = np.array([self.get_gradient_color(col) if amplitudes[col] > i+1 else self._bg_color for i in range(0, self._height)])
                 p[col] = array
 
             for row in range(0, self._height):

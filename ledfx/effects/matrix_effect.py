@@ -31,3 +31,7 @@ class MatrixEffect(Effect):
             ): vol.In([i.value for i in Orientation]),
         }
     )
+
+    def config_updated(self, config):
+        self._height = self._config["matrix_height"]
+        self._width = self._config["matrix_width"]

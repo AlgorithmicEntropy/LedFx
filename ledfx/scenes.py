@@ -33,6 +33,18 @@ class Scenes:
                     description="Image or icon to display",
                     default="Wallpaper",
                 ): str,
+                vol.Optional(
+                    "scene_tags",
+                    description="Tags for filtering",
+                ): str,
+                vol.Optional(
+                    "scene_puturl",
+                    description="On Scene Activate, URL to PUT too",
+                ): str,
+                vol.Optional(
+                    "scene_payload",
+                    description="On Scene Activate, send this payload to scene_puturl",
+                ): str,
                 vol.Required(
                     "virtuals",
                     description="The effects of these virtuals will be saved",

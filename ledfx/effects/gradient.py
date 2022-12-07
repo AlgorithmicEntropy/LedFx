@@ -138,7 +138,7 @@ class GradientEffect(Effect):
             self._gradient_curve = np.roll(
                 self._gradient_curve,
                 int(pixels_to_roll),
-                axis=0,
+                axis=1,
             )
 
     def get_gradient_color(self, point):
@@ -168,6 +168,9 @@ class TemporalGradientEffect(TemporalEffect, GradientEffect, ModulateEffect):
 
     NAME = "Gradient"
     CATEGORY = "Non-Reactive"
+
+    def on_activate(self, pixel_count):
+        pass
 
     def effect_loop(self):
         # TODO: Could add some cool effects like twinkle or sin modulation

@@ -29,9 +29,9 @@ class QLCEndpoint(RestEndpoint):
         for effect_type, effect in self._ledfx.effects.classes().items():
             effect_names.append(effect.NAME)
 
-        scene_names = []
+        scene_ids = []
         for scene in self._ledfx.config["scenes"]:
-            scene_names.append(self._ledfx.config["scenes"][scene]["name"])
+            scene_ids.append(self._ledfx.config["scenes"][scene]["name"])
 
         response["event_types"] = {
             Event.EFFECT_SET: {
@@ -44,7 +44,7 @@ class QLCEndpoint(RestEndpoint):
             },
             Event.SCENE_ACTIVATED: {
                 "event_name": "Scene Set",
-                "event_filters": {"scene_name": scene_names},
+                "event_filters": {"scene_id": scene_ids},
             },
         }
 
@@ -55,7 +55,7 @@ class QLCEndpoint(RestEndpoint):
         return web.json_response(data=response, status=200)
 
     async def put(self, integration_id, request) -> web.Response:
-        """ Toggle a QLC event listener """
+        """Toggle a QLC event listener"""
         integration = self._ledfx.integrations.get(integration_id)
         if (integration is None) or (integration.type != "qlc"):
             response = {"not found": 404}
@@ -89,7 +89,7 @@ class QLCEndpoint(RestEndpoint):
         if type(event_filter) is not dict:
             response = {
                 "status": "failed",
-                "reason": f'Invalid filter "{event_filter}", should be dictionary eg. {{ "scene_name" : "my scene" }} ',
+                "reason": f'Invalid filter "{event_filter}", should be dictionary eg. {{ "scene_id" : "my scene" }} ',
             }
             return web.json_response(data=response, status=400)
 
@@ -115,7 +115,7 @@ class QLCEndpoint(RestEndpoint):
         return web.json_response(data=response, status=200)
 
     async def post(self, integration_id, request) -> web.Response:
-        """ Add a new QLC event listener or update an existing one """
+        """Add a new QLC event listener or update an existing one"""
         integration = self._ledfx.integrations.get(integration_id)
         if (integration is None) or (integration.type != "qlc"):
             response = {"not found": 404}
@@ -150,7 +150,7 @@ class QLCEndpoint(RestEndpoint):
         if type(event_filter) is not dict:
             response = {
                 "status": "failed",
-                "reason": f'Invalid filter "{event_filter}", should be dictionary eg. {{ "scene_name" : "my scene" }} ',
+                "reason": f'Invalid filter "{event_filter}", should be dictionary eg. {{ "scene_id" : "my scene" }} ',
             }
             return web.json_response(data=response, status=400)
 
@@ -178,7 +178,7 @@ class QLCEndpoint(RestEndpoint):
         return web.json_response(data=response, status=200)
 
     async def delete(self, integration_id, request) -> web.Response:
-        """ Delete a QLC event listener """
+        """Delete a QLC event listener"""
         integration = self._ledfx.integrations.get(integration_id)
         if (integration is None) or (integration.type != "qlc"):
             response = {"not found": 404}
@@ -212,7 +212,7 @@ class QLCEndpoint(RestEndpoint):
         if type(event_filter) is not dict:
             response = {
                 "status": "failed",
-                "reason": f'Invalid filter "{event_filter}", should be dictionary eg. {{ "scene_name" : "my scene" }} ',
+                "reason": f'Invalid filter "{event_filter}", should be dictionary eg. {{ "scene_id" : "my scene" }} ',
             }
             return web.json_response(data=response, status=400)
 

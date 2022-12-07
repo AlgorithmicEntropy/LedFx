@@ -16,15 +16,31 @@ For non-development purposes run:
 """
 
 import argparse
+import importlib
 import logging
 import os
 import subprocess
 import sys
 from logging.handlers import RotatingFileHandler
 
-import psutil
-import yappi
-from pyupdater.client import Client
+try:
+    import psutil
+
+    have_psutil = True
+except ImportError:
+    have_psutil = False
+try:
+    import yappi
+
+    have_yappi = True
+except ImportError:
+    have_yappi = False
+try:
+    from pyupdater.client import Client
+
+    have_updater = True
+except ImportError:
+    have_updater = False
 
 import ledfx.config as config_helpers
 from ledfx.consts import (
@@ -91,12 +107,8 @@ def setup_logging(loglevel, config_dir):
         backupCount=5,  # once it hits 2.5MB total, start removing logs.
     )
     file_handler.setLevel(file_loglevel)  # set loglevel
-    file_formatter = logging.Formatter(
-        file_logformat
-    )  # a simple log file format
-    file_handler.setFormatter(
-        file_formatter
-    )  # tell the file_handler to use this format
+    file_formatter = logging.Formatter(file_logformat)
+    file_handler.setFormatter(file_formatter)
 
     console_handler = logging.StreamHandler()
     console_handler.setLevel(console_loglevel)  # set loglevel
@@ -220,6 +232,9 @@ def installed_via_pip():
     Returns:
         boolean
     """
+    pip_spec = importlib.util.find_spec("pip")
+    if pip_spec is None:
+        return False
     pip_package_command = subprocess.check_output(
         [sys.executable, "-m", "pip", "freeze"]
     )
@@ -296,41 +311,40 @@ def main():
     config_helpers.load_logger()
 
     # Set some process priority optimisations
-    p = psutil.Process(os.getpid())
+    if have_psutil:
+        p = psutil.Process(os.getpid())
 
-    if psutil.WINDOWS:
-        try:
-            p.nice(psutil.HIGH_PRIORITY_CLASS)
-        except psutil.Error:
-            _LOGGER.info(
-                "Unable to set priority, please run as Administrator if you are experiencing frame rate issues"
-            )
-        # p.ionice(psutil.IOPRIO_HIGH)
-    elif psutil.LINUX:
-        try:
-            p.nice(15)
-            p.ionice(psutil.IOPRIO_CLASS_RT, value=7)
-        except psutil.Error:
-            _LOGGER.info(
-                "Unable to set priority, please run as root or sudo if you are experiencing frame rate issues",
-            )
-    else:
-        p.nice(15)
-
-    if not (currently_frozen() or installed_via_pip()):
-        if args.offline_mode:
-            _LOGGER.warning(
-                "Offline Mode Enabled - Please check for updates regularly."
-            )
+        if psutil.WINDOWS:
+            try:
+                p.nice(psutil.HIGH_PRIORITY_CLASS)
+            except psutil.Error:
+                _LOGGER.info(
+                    "Unable to set priority, please run as Administrator if you are experiencing frame rate issues"
+                )
+            # p.ionice(psutil.IOPRIO_HIGH)
+        elif psutil.LINUX:
+            try:
+                p.nice(15)
+                p.ionice(psutil.IOPRIO_CLASS_RT, value=7)
+            except psutil.Error:
+                _LOGGER.info(
+                    "Unable to set priority, please run as root or sudo if you are experiencing frame rate issues",
+                )
         else:
-            import ledfx.sentry_config  # noqa: F401
+            p.nice(15)
+
+    if (
+        not (currently_frozen() or installed_via_pip())
+        and args.offline_mode is False
+    ):
+        import ledfx.sentry_config  # noqa: F401
 
     if args.sentry_test:
         """This will crash LedFx and submit a Sentry error if Sentry is configured"""
         _LOGGER.warning("Steering LedFx into a brick wall")
         div_by_zero = 1 / 0
 
-    if args.tray or currently_frozen():
+    if args.tray:
         # If pystray is imported on a device that can't display it, it explodes. Catch it
         try:
             import pystray
@@ -358,9 +372,8 @@ def main():
         icon = None
     # icon = None
 
-
-    if not args.offline_mode and currently_frozen():
-        update_ledfx(icon)
+    # if have_updater and not args.offline_mode and currently_frozen():
+    #     update_ledfx(icon)
 
     if icon:
         icon.run(setup=entry_point)
@@ -376,7 +389,7 @@ def entry_point(icon=None):
     while exit_code == 4:
         _LOGGER.info("LedFx Core is initializing")
 
-        if args.performance:
+        if args.performance and have_yappi:
             print("Collecting performance data...")
             yappi.start()
 
@@ -399,9 +412,7 @@ def entry_point(icon=None):
             stats = yappi.get_func_stats()
             yappi.get_thread_stats().print_all()
             stats.save(filename, type="pstat")
-            print(
-                f"Saved performance data to config directory      : {filename}"
-            )
+            print(f"Saved performance data to config directory: {filename}")
             print(
                 "Please send the performance data to a developer : https://ledfx.app/contact/"
             )

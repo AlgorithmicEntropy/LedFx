@@ -1,5 +1,6 @@
 import colorsys
 import logging
+import threading
 
 # from ledfx.effects.audio import FREQUENCY_RANGES
 from functools import lru_cache
@@ -22,6 +23,9 @@ class DummyEffect:
 
     def __init__(self, pixel_count):
         self.pixels = np.zeros((pixel_count, 3))
+
+    def _render(self):
+        pass
 
     def render(self):
         pass
@@ -235,6 +239,7 @@ class Effect(BaseRegistry):
         self._ledfx = ledfx
         self._config = {}
         self.update_config(config)
+        self.lock = threading.Lock()
 
     def __del__(self):
         if self._active:
@@ -308,6 +313,11 @@ class Effect(BaseRegistry):
         """
         pass
 
+    def _render(self):
+        self.lock.acquire()
+        self.render()
+        self.lock.release()
+
     def render(self):
         """
         To be implemented by child effect
@@ -318,6 +328,8 @@ class Effect(BaseRegistry):
         pass
 
     def get_pixels(self):
+        if not hasattr(self, "pixels"):
+            return
         pixels = np.copy(self.pixels)
         # Apply some of the base output filters if necessary
         if self._config["flip"]:
@@ -329,7 +341,8 @@ class Effect(BaseRegistry):
         if self._config["background_color"]:
             # TODO: colors in future should have an alpha value, which would work nicely to apply to dim the background color
             # for now, just set it a bit less bright.
-            pixels += self._bg_color * 0.5
+            # pixels += self._bg_color * 0.5
+            pixels += self._bg_color
         if self._config["brightness"] is not None:
             np.multiply(
                 pixels,

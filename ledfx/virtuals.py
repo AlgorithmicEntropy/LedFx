@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+import timeit
 from functools import cached_property
 
 import numpy as np
@@ -267,17 +268,22 @@ class Virtual:
             _LOGGER.warning(error)
             raise ValueError(error)
 
-        self.transition_frame_total = (
-            self.refresh_rate * self._config["transition_time"]
-        )
-        self.transition_frame_counter = 0
+        if (
+            self._config["transition_mode"] != "None"
+            and self._config["transition_time"] > 0
+        ):
+            self.transition_frame_total = (
+                self.refresh_rate * self._config["transition_time"]
+            )
+            self.transition_frame_counter = 0
 
-        if self._active_effect is None:
-            self._transition_effect = DummyEffect(self.pixel_count)
-
+            if self._active_effect is None:
+                self._transition_effect = DummyEffect(self.pixel_count)
+            else:
+                self.clear_transition_effect()
+                self._transition_effect = self._active_effect
         else:
             self.clear_transition_effect()
-            self._transition_effect = self._active_effect
 
         self._active_effect = effect
         self._active_effect.activate(self)
@@ -351,6 +357,7 @@ class Virtual:
         while True:
             if not self._active:
                 break
+            start_time = timeit.default_timer()
             if (
                 self._active_effect
                 and self._active_effect.is_active
@@ -373,14 +380,22 @@ class Virtual:
                     )
 
             time.sleep(fps_to_sleep_interval(self.refresh_rate))
+            pass_time = timeit.default_timer() - start_time
+            min_time = time.get_clock_info("monotonic").resolution
+            # use an aggressive check for did we sleep against implied min
+            # for all otherwise working behaviours this will be passive
+            if pass_time < (min_time / 2):
+                time.sleep(min_time - pass_time)
 
     def assemble_frame(self):
         """
         Assembles the frame to be flushed.
         """
         # Get and process active effect frame
-        self._active_effect.render()
+        self._active_effect._render()
         frame = self._active_effect.get_pixels()
+        if frame is None:
+            return
         frame[frame > 255] = 255
         frame[frame < 0] = 0
         # np.clip(frame, 0, 255, frame)
@@ -393,8 +408,6 @@ class Virtual:
             self._transition_effect is not None
             and self._transition_effect.is_active
             and hasattr(self._transition_effect, "pixels")
-            and self._config["transition_mode"] != "None"
-            and self._config["transition_time"] > 0
         ):
             # Get and process transition effect frame
             self._transition_effect.render()
@@ -744,9 +757,18 @@ class Virtuals:
                 ledfx=self._ledfx,
             )
             if "segments" in virtual:
-                self._ledfx.virtuals.get(virtual["id"]).update_segments(
-                    virtual["segments"]
-                )
+                try:
+                    self._ledfx.virtuals.get(virtual["id"]).update_segments(
+                        virtual["segments"]
+                    )
+                except vol.MultipleInvalid:
+                    _LOGGER.warning(
+                        "Virtual Segment Changed. Not restoring segment"
+                    )
+                    continue
+                except RuntimeError:
+                    pass
+
             if "effect" in virtual:
                 try:
                     effect = self._ledfx.effects.create(

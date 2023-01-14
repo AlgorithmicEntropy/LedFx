@@ -6,7 +6,7 @@ import voluptuous as vol
 from ledfx.effects.fonts.font_3x3 import Font3x3
 from ledfx.effects.fonts.font_5x5 import Font5x5
 from .fonts.font_3x3 import Font3x3
-import time
+import datetime
 
 class MatrixText(AudioReactiveEffect, MatrixEffect):
     NAME = "Matrix Text"
@@ -93,7 +93,7 @@ class MatrixText(AudioReactiveEffect, MatrixEffect):
         self._text_buff = text_arr
 
     def audio_data_updated(self, data):
-        currentTime = time.time()
+        currentTime = datetime.time()
         if (
             data.volume_beat_now()
             and currentTime - self.last_bass_strobe_time

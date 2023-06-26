@@ -18,10 +18,15 @@ def interpolate_pixels(pixels, new_length):
     x_new = _normalized_linspace(new_length)
     new_pixels = np.zeros((len(x_new), pixels.shape[1]))
 
-    new_pixels[:, 0] = np.interp(x_new, x_old, pixels[:, 0])
-    new_pixels[:, 1] = np.interp(x_new, x_old, pixels[:, 1])
-    new_pixels[:, 2] = np.interp(x_new, x_old, pixels[:, 2])
+    # Interpolate the R,G,B portions of the pixel array
+    # Lots of attempts at vectorisation/performance improvements here
+    # This appears to be optimal from a readability/performance point of view
+    # TODO: If we ever move to RGBW pixel arrays, uncomment the last line to operate on the W portion
 
+    new_pixels[:, 0] = np.interp(x_new, x_old, pixels[:, 0])  # R
+    new_pixels[:, 1] = np.interp(x_new, x_old, pixels[:, 1])  # G
+    new_pixels[:, 2] = np.interp(x_new, x_old, pixels[:, 2])  # B
+    # new_pixels[:, 3] = np.interp(x_new, x_old, pixels[:, 3]) # W
     return new_pixels
 
 
@@ -45,6 +50,7 @@ def interpolate_pixels(pixels, new_length):
 # 3. Neither the name of the copyright holder nor the names of its
 #    contributors may be used to endorse or promote products derived
 #    from this software without specific prior written permission.
+
 
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
@@ -150,7 +156,6 @@ class ExpFilter:
         self.value = val
 
     def update(self, value):
-
         # Handle deferred initilization
         if self.value is None:
             self.value = value

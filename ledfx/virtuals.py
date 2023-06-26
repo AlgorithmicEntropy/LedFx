@@ -1,4 +1,5 @@
 import logging
+import sys
 import threading
 import time
 import timeit
@@ -34,7 +35,6 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class Virtual:
-
     CONFIG_SCHEMA = vol.Schema(
         {
             vol.Required(
@@ -100,6 +100,11 @@ class Virtual:
                     max=MAX_FREQ,
                 ),
             ),  # AND HERE TOO,
+            vol.Optional(
+                "rows",
+                description="Amount of rows. > 1 if this virtual is a matrix",
+                default=1,
+            ): int,
         }
     )
 
@@ -122,6 +127,13 @@ class Virtual:
     _output_thread = None
     _active_effect = None
     _transition_effect = None
+
+    if (
+        sys.version_info[0] == 3 and sys.version_info[1] >= 11
+    ) or sys.version_info[0] >= 4:
+        _min_time = time.get_clock_info("perf_counter").resolution
+    else:
+        _min_time = time.get_clock_info("monotonic").resolution
 
     def __init__(self, ledfx, config):
         self._ledfx = ledfx
@@ -349,6 +361,17 @@ class Virtual:
 
             self._active = False
 
+    def force_frame(self, color):
+        """
+        Force all pixels in device to color
+        Use for pre-clearing in calibration scenarios
+        """
+        self.assembled_frame = np.full((self.pixel_count, 3), color)
+        self.flush(self.assembled_frame)
+        self._ledfx.events.fire_event(
+            VirtualUpdateEvent(self.id, self.assembled_frame)
+        )
+
     @property
     def active_effect(self):
         return self._active_effect
@@ -379,13 +402,20 @@ class Virtual:
                         VirtualUpdateEvent(self.id, self.assembled_frame)
                     )
 
-            time.sleep(fps_to_sleep_interval(self.refresh_rate))
+            # adjust for the frame assemble time, min allowed sleep 1 ms
+            # this will be more frame accurate on high res sleep systems
+            run_time = timeit.default_timer() - start_time
+            sleep_time = max(
+                0.001, fps_to_sleep_interval(self.refresh_rate) - run_time
+            )
+            time.sleep(sleep_time)
+
+            # use an aggressive check for did we sleep against expected min clk
+            # for all high res scenarios this will be passive
+            # for unexpected high res sleep on windows scenarios it will adapt
             pass_time = timeit.default_timer() - start_time
-            min_time = time.get_clock_info("monotonic").resolution
-            # use an aggressive check for did we sleep against implied min
-            # for all otherwise working behaviours this will be passive
-            if pass_time < (min_time / 2):
-                time.sleep(min_time - pass_time)
+            if pass_time < (self._min_time / 2):
+                time.sleep(max(0.001, self._min_time - pass_time))
 
     def assemble_frame(self):
         """
@@ -410,11 +440,10 @@ class Virtual:
             and hasattr(self._transition_effect, "pixels")
         ):
             # Get and process transition effect frame
-            self._transition_effect.render()
+            self._transition_effect._render()
             transition_frame = self._transition_effect.get_pixels()
-            # np.clip(transition_frame, 0, 255, transition_frame)
-            transition_frame[frame > 255] = 255
-            transition_frame[frame < 0] = 0
+            transition_frame[transition_frame > 255] = 255
+            transition_frame[transition_frame < 0] = 0
 
             if self._config["center_offset"]:
                 transition_frame = np.roll(
@@ -439,6 +468,7 @@ class Virtual:
                 self.clear_transition_effect()
 
         np.multiply(frame, self._config["max_brightness"], frame)
+        np.multiply(frame, self._ledfx.config["global_brightness"], frame)
 
         return frame
 
@@ -754,6 +784,7 @@ class Virtuals:
                 id=virtual["id"],
                 config=virtual["config"],
                 is_device=virtual["is_device"],
+                auto_generated=virtual["auto_generated"],
                 ledfx=self._ledfx,
             )
             if "segments" in virtual:
@@ -803,6 +834,7 @@ class Virtuals:
         # Create the new virtual and validate the schema.
         _config = kwargs.pop("config", None)
         _is_device = kwargs.pop("is_device", False)
+        _auto_generated = kwargs.pop("auto_generated", False)
         if _config is not None:
             _config = Virtual.CONFIG_SCHEMA(_config)
             obj = Virtual(config=_config, *args, **kwargs)
@@ -812,6 +844,7 @@ class Virtuals:
         # Attach some common properties
         setattr(obj, "_id", id)
         setattr(obj, "is_device", _is_device)
+        setattr(obj, "auto_generated", _auto_generated)
 
         # Store the object into the internal list and return it
         self._virtuals[id] = obj

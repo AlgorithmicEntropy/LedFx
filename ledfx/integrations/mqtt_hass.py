@@ -453,11 +453,12 @@ class MQTT_HASS(Integration):
                 # AudioSelector
                 client.publish(
                     f"{self._config['topic']}/select/ledfxaudio/state",
-                    AudioInputSource.input_devices()[
+                    AudioInputSource.input_devices().get(
                         self._ledfx.config.get("audio", {}).get(
-                            "audio_device", {}
-                        )
-                    ],
+                            "audio_device", None
+                        ),
+                        None
+                    ),
                 )
                 # Pixel-Sensor
                 client.publish(

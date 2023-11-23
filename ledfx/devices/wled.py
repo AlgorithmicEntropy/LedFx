@@ -1,13 +1,12 @@
 import logging
 
 import voluptuous as vol
-from pkg_resources import parse_version
 
 from ledfx.devices import NetworkedDevice
 from ledfx.devices.ddp import DDPDevice
 from ledfx.devices.e131 import E131Device
 from ledfx.devices.udp import UDPRealtimeDevice
-from ledfx.utils import WLED
+from ledfx.utils import WLED, wled_support_DDP
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,9 +22,9 @@ class WLEDDevice(NetworkedDevice):
         {
             vol.Optional(
                 "sync_mode",
-                description="Streaming protocol to WLED device. Recommended: UDP<480px, DDP>480px",
-                default="UDP",
-            ): vol.In(["UDP", "DDP", "E131"]),
+                description="Streaming protocol to WLED device. Recommended: DDP for 0.13 or later. Use UDP for older versions.",
+                default="DDP",
+            ): vol.In(["DDP", "UDP", "E131"]),
             vol.Optional(
                 "timeout",
                 description="Time between LedFx effect off and WLED effect activate",
@@ -135,14 +134,14 @@ class WLEDDevice(NetworkedDevice):
                         if rows > 1:
                             self.sub_v(
                                 name,
-                                "wled",
-                                [[seg["start"], rows * (seg["stop"] - 1) + 1]],
+                                None,
+                                [[seg["start"], (rows * seg["stop"]) - 1]],
                                 rows,
                             )
                         else:
                             self.sub_v(
                                 name,
-                                "wled",
+                                None,
                                 [[seg["start"], rows * (seg["stop"] - 1)]],
                                 rows,
                             )
@@ -159,7 +158,7 @@ class WLEDDevice(NetworkedDevice):
         wled_name = wled_config["name"]
         wled_count = led_info["count"]
         wled_rgbmode = led_info["rgbw"]
-        wled_version = wled_config["ver"]
+        wled_build = wled_config["vid"]
 
         wled_config = {
             "name": wled_name,
@@ -172,10 +171,8 @@ class WLEDDevice(NetworkedDevice):
 
         # Currently *assuming* that this PR gets released in 0.13
         # https://github.com/Aircoookie/WLED/pull/1944
-        if parse_version(wled_version) >= parse_version("0.13.0"):
-            _LOGGER.info(
-                f"WLED Version Supports Sync Setting API: {wled_version}"
-            )
+        if wled_support_DDP(wled_build):
+            _LOGGER.info(f"WLED Build Supports Sync Setting API: {wled_build}")
             wled_sync_settings = await self.wled.get_sync_settings()
         # self.wled.enable_realtime_gamma()
         # self.wled.set_inactivity_timeout(self._config["timeout"])

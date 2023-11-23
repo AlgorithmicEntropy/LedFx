@@ -21,4 +21,11 @@ hiddenimports = [
     "icmplib",
     "flux_led",
     "voluptuous",
+    "mbedtls",
+    "mbedtls.mpi",
+    "mbedtls._platform",
+    "mbedtls._ringbuf",
+    "pythonosc",
+    "pythonosc.osc_message_builder",
+    "pythonosc.udp_client",
 ]

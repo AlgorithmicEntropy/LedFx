@@ -34,7 +34,7 @@ INSTALL_REQUIRES = [
     "psutil>=5.8.0",
     "pyserial>=3.5",
     "pystray>=0.17",
-    "python-rtmidi~=1.5.3",
+    "python-rtmidi~=1.5.6",
     "requests~=2.28.2",
     "sacn~=1.6.3",
     "sentry-sdk==1.14.0",
@@ -51,7 +51,10 @@ INSTALL_REQUIRES = [
     'uvloop>=0.16.0; platform_system != "Windows"',
     # We can install this on all linux devices, it just won't work for anything other than a Pi
     'rpi-ws281x>=4.3.0; platform_system == "Linux"',
+    # No whl for arm linux need to be build from source
+    'python-mbedtls~=2.7.1; (platform_system == "Linux" and platform_machine != "aarch64" and platform_machine != "armv7l") or platform_system == "Windows" or platform_system == "Darwin"',
     "flux-led>=0.28.35",
+    "python-osc~=1.8.3",
 ]
 
 

@@ -14,6 +14,7 @@
 import array
 import logging
 import time
+import timeit
 
 import rtmidi
 from rtmidi.midiutil import open_midiinput, open_midioutput
@@ -168,6 +169,12 @@ class RtmidiWrap:
     def RawWrite(self, stat, dat1, dat2):
         self.devOut.send_message([stat, dat1, dat2])
 
+    # -------------------------------------------------------------------------------------
+    # -- sends a running status 2 byte message MADNESS
+    # -------------------------------------------------------------------------------------
+    def RawWriteTwo(self, dat1, dat2):
+        self.devOut.send_message([dat1, dat2])
+
 
 # ==========================================================================
 # CLASS LaunchpadBase
@@ -177,16 +184,23 @@ class LaunchpadBase:
     # these are defaults that need to be overridden in inheriting classes
     layout = {"pixels": 0, "rows": 0}
     segments = []
-
-    def flush(self, data):
-        _LOGGER.error(f"flush not implemented for {self.__class__.__name__}")
-
     # end defaults
 
     def __init__(self):
         self.midi = RtmidiWrap()  # midi interface instance (singleton)
         self.idOut = None
         self.idIn = None
+        self.lasttime = 0
+        self.frame = 0
+        self.fps = 0
+        self.do_once = True
+
+    def flush(self, data, alpha, diag):
+        if self.do_once:
+            _LOGGER.error(
+                f"flush not implemented for {self.__class__.__name__}"
+            )
+            self.do_once = False
 
     def __del__(self):
         self.Close()
@@ -666,6 +680,45 @@ class LaunchpadMk2(LaunchpadPro):
     # -- Opens one of the attached Launchpad MIDI devices.
     # -- Uses search string "Mk2", by default.
     # -------------------------------------------------------------------------------------
+
+    # Mk2 programmers manual
+    # https://fael-downloads-prod.focusrite.com/customer/prod/s3fs-public/downloads/Launchpad%20MK2%20Programmers%20Reference%20Manual%20v1.03.pdf
+
+    layout = {"pixels": 81, "rows": 9}
+    segments = [
+        ("TopBar", "mdi:table-row", [[72, 79]], 1),
+        (
+            "RightBar",
+            "mdi:table-column",
+            [
+                [8, 8],
+                [17, 17],
+                [26, 26],
+                [35, 35],
+                [44, 44],
+                [53, 53],
+                [62, 62],
+                [71, 71],
+            ],
+            1,
+        ),
+        (
+            "Matrix",
+            "mdi:grid",
+            [
+                [0, 7],
+                [9, 16],
+                [18, 25],
+                [27, 34],
+                [36, 43],
+                [45, 52],
+                [54, 61],
+                [63, 70],
+            ],
+            8,
+        ),
+    ]
+
     # Overrides "LaunchpadPro" method
     def Open(self, number=0, name="Mk2"):
         return super().Open(number=number, name=name)
@@ -706,6 +759,70 @@ class LaunchpadMk2(LaunchpadPro):
                 return None
         else:
             return None
+
+    def flush(self, data, alpha, diag):
+        if diag:
+            start = timeit.default_timer()
+
+        try:
+            # we will use RawWriteSysEx(self, lstMessage, timeStamp=0)
+            # this function adds the preamble 240 and post amble 247
+            #
+            # There is only one layout implied for LEDs:
+            #
+            # Host => Launchpad MK2:
+            # Hex: F0h 00h 20h 29h 02h 18h 08h <colourspec> [<colourspec> […]] F7h
+            # Dec: 240 0   32  41  2   24  11  <colourspec> [<colourspec> […]] 247
+            #
+            # the <colourspec> is structured as follows:
+            # - LED index (1 byte)  ---- WARNING, each row starts at 11, 21, 31 etc
+            # - Lighting data (1 – 3 bytes)
+            # - 3: RGB colour, 3 bytes for Red, Green and Blue 6 bit (63: Max, 0: Min).
+            # Final top row starts at 104 for control buttons and is only 8 wide
+            #
+            # The message may contain up to 80 <colourspec> entries to light up the entire
+            # Launchpad Mk2 surface.
+
+            # stuff the send buffer with the command preamble
+            send_buffer = [0, 32, 41, 2, 24, 11]
+
+            # prebump the programmer mode index up a row and just before
+            pgm_mode_pos = 10
+            for idx, pixel in enumerate(data):
+                # there is no top right icon, skip it
+                if idx >= 80:
+                    break
+                # check for row bumps
+                if idx % 9 == 0:
+                    pgm_mode_pos += 1
+                # one time correct for top row control buttons index'd at 104
+                if pgm_mode_pos == 91:
+                    pgm_mode_pos = 104
+                send_buffer.extend(
+                    [
+                        pgm_mode_pos,
+                        max(min(int(pixel[0] // 4), 63), 0),
+                        max(min(int(pixel[1] // 4), 63), 0),
+                        max(min(int(pixel[2] // 4), 63), 0),
+                    ]
+                )
+                pgm_mode_pos += 1
+            self.midi.RawWriteSysEx(send_buffer)
+
+        except RuntimeError:
+            _LOGGER.error("Error in Launchpad Mk2 handling")
+
+        if diag:
+            now = timeit.default_timer()
+            nowint = int(now)
+            # if now just rolled over a second boundary
+            if nowint != self.lasttime:
+                self.fps = self.frame
+                self.frame = 0
+            else:
+                self.frame += 1
+            _LOGGER.info(f"Launchpad Mk2 flush {self.fps} : {now - start}")
+            self.lasttime = nowint
 
 
 # ==========================================================================
@@ -1254,18 +1371,6 @@ class LaunchpadMiniMk3(LaunchpadPro):
     def LedSetButtonLayoutSession(self):
         self.LedSetLayout(0)
 
-    # -------------------------------------------------------------------------------------
-    # -- Go back to custom modes before closing connection
-    # -- Otherwise Launchpad will stuck in programmer mode
-    # -------------------------------------------------------------------------------------
-    def Close(self):
-        # removed for now (LEDs would light up again; should be in the user's code)
-        # 		self.LedSetLayout( 0x05 )
-
-        # TODO: redundant (but needs fix for Py2 embedded anyway)
-        self.midi.CloseInput()
-        self.midi.CloseOutput()
-
 
 # ==========================================================================
 # CLASS LaunchpadLPX
@@ -1405,15 +1510,6 @@ class LaunchpadLPX(LaunchpadPro):
         self.LedSetLayout(0)
 
     # -------------------------------------------------------------------------------------
-    # -- Go back to custom modes before closing connection
-    # -- Otherwise Launchpad will stuck in programmer mode
-    # -------------------------------------------------------------------------------------
-    def Close(self):
-        # TODO: redundant (but needs fix for Py2 embedded anyway)
-        self.midi.CloseInput()
-        self.midi.CloseOutput()
-
-    # -------------------------------------------------------------------------------------
     # -- Returns the raw value of the last button change (pressed/unpressed) as a list
     # -- [ <button>, <value> ], in which <button> is the raw number of the button and
     # -- <value> an intensity value from 0..127.
@@ -1495,7 +1591,10 @@ class LaunchpadLPX(LaunchpadPro):
         else:
             return None
 
-    def flush(self, data):
+    def flush(self, data, alpha, diag):
+        if diag:
+            start = timeit.default_timer()
+
         try:
             # we will use RawWriteSysEx(self, lstMessage, timeStamp=0)
             # this function adds the preamble 240 and post amble 247
@@ -1535,8 +1634,6 @@ class LaunchpadLPX(LaunchpadPro):
             # example of send RED pixel at row 3 pixel 6
             # send_buffer.extend([3, 35, 127, 0, 0])
 
-            #            start = timeit.default_timer()
-
             # stuff the send buffer with the command preamble
             send_buffer = [0, 32, 41, 2, 12, 3]
 
@@ -1557,11 +1654,21 @@ class LaunchpadLPX(LaunchpadPro):
                 )
                 pgm_mode_pos += 1
             self.midi.RawWriteSysEx(send_buffer)
-            # took = timeit.default_timer() - start
-            # _LOGGER.info(f"Updated Pixels: {took} ")
 
         except RuntimeError:
             _LOGGER.error("Error in LaunchpadLPX handling")
+
+        if diag:
+            now = timeit.default_timer()
+            nowint = int(now)
+            # if now just rolled over a second boundary
+            if nowint != self.lasttime:
+                self.fps = self.frame
+                self.frame = 0
+            else:
+                self.frame += 1
+            _LOGGER.info(f"Launchpad X flush {self.fps} : {now - start}")
+            self.lasttime = nowint
 
 
 # ==========================================================================
@@ -1911,3 +2018,181 @@ class LaunchpadProMk3(LaunchpadPro):
         # re-enter Live mode
         if self.midi.devIn is not None and self.midi.devOut is not None:
             self.LedSetMode(0)
+
+
+# ==========================================================================
+# CLASS Launchpad S
+#
+# It's an older code sir, but it checks out.
+# https://www.bhphotovideo.com/lit_files/88417.pdf
+# ==========================================================================
+class LaunchpadS(LaunchpadPro):
+    layout = {"pixels": 81, "rows": 9}
+    segments = [
+        ("TopBar", "mdi:table-row", [[72, 79]], 1),
+        (
+            "RightBar",
+            "mdi:table-column",
+            [
+                [8, 8],
+                [17, 17],
+                [26, 26],
+                [35, 35],
+                [44, 44],
+                [53, 53],
+                [62, 62],
+                [71, 71],
+            ],
+            1,
+        ),
+        (
+            "Matrix",
+            "mdi:grid",
+            [
+                [0, 7],
+                [9, 16],
+                [18, 25],
+                [27, 34],
+                [36, 43],
+                [45, 52],
+                [54, 61],
+                [63, 70],
+            ],
+            8,
+        ),
+    ]
+
+    # this maps pixels from physical bottom left to launchpad references
+    # as it is explicit per pixel
+    # fmt: off
+    pixel_map = [112, 113, 114, 115, 116, 117, 118, 119, 120,
+                 96, 97, 98, 99, 100, 101, 102, 103, 104,
+                 80, 81, 82, 83, 84, 85, 86, 87, 88,
+                 64, 65, 66, 67, 68, 69, 70, 71, 72,
+                 48, 49, 50, 51, 52, 53, 54, 55, 56,
+                 32, 33, 34, 35, 36, 37, 38, 39, 40,
+                 16, 17, 18, 19, 20, 21, 22, 23, 24,
+                 0, 1, 2, 3, 4, 5, 6, 7, 8,
+                 104, 105, 106, 107, 108, 109, 110, 111, 112]
+    # fmt: on
+
+    # this maps launchpad pixels from bottom left to source from data
+    # as plotting is order driven via a complex mapping of
+
+    # Starting at the top-left-hand corner in either mode, subsequent
+    # note messages update the 64-pad grid horizontally and then
+    # vertically. They then update the eight clip launch buttons, and
+    # then the eight mode buttons.
+
+    # fmt: off
+    pixel_map2 = [63, 64, 65, 66, 67, 68, 69, 70,
+                  54, 55, 56, 57, 58, 59, 60, 61,
+                  45, 46, 47, 48, 49, 50, 51, 52,
+                  36, 37, 38, 39, 40, 41, 42, 43,
+                  27, 28, 29, 30, 31, 32, 33, 34,
+                  18, 19, 20, 21, 22, 23, 24, 25,
+                  9, 10, 11, 12, 13, 14, 15, 16,
+                  0, 1, 2, 3, 4, 5, 6, 7,
+                  71, 62, 53, 44, 35, 26, 17, 8,
+                  72, 73, 74, 75, 76, 77, 78, 79]
+    # fmt: on
+
+    buffer0 = True
+
+    def Open(self, number=0, name="Launchpad S"):
+        retval = super().Open(number=number, name=name)
+        if retval is True:
+            _LOGGER.info("Launchpad S ready")
+            # no mode set required, at least nothing in the manual
+        # try and clear the leds
+        self.midi.RawWrite(0xB0, 0x00, 0x00)
+        return retval
+
+    def LedSetLayout(self, mode):
+        _LOGGER.error("LedSetLayout for Launchpad S has not been implemented")
+
+    def LedSetMode(self, mode):
+        _LOGGER.error("LedSetMode for Launchpad S has not been implemented")
+
+    def LedSetButtonLayoutSession(self):
+        _LOGGER.error(
+            "LedSetButtonLayoutSession for Launchpad S has not been implemented"
+        )
+
+    def ButtonStateRaw(self, returnPressure=False):
+        _LOGGER.error(
+            "ButtonStateRaw for Launchpad S has not been implemented"
+        )
+
+    def ButtonStateXY(self, mode="classic", returnPressure=False):
+        _LOGGER.error("ButtonStateXY for Launchpad S has not been implemented")
+
+    def scolmap(self, r, g):
+        if r > 191.0:
+            out = 0x0F
+        elif r > 127.0:
+            out = 0x0E
+        elif r > 63.0:
+            out = 0x0D
+        else:
+            out = 0x0C
+
+        if g > 191.0:
+            out |= 0x30
+        elif g > 127.0:
+            out |= 0x20
+        elif g > 63.0:
+            out |= 0x10
+
+        return out
+
+    def flush(self, data, alpha, diag):
+        # https://www.bhphotovideo.com/lit_files/88417.pdf
+        # how to do channels in rtmidi
+        # https://github.com/SpotlightKid/python-rtmidi/issues/38
+
+        # 92 is Note on, channel 3 ( 3 - 1) followed by 2 color pixel data bytes
+        # pixel data = 0x0C | 0x30 green | 0x03 red
+        # code now supports running mode where status byte is only sent at
+        # start of frame
+        if diag:
+            start = timeit.default_timer()
+
+        send_status = True
+
+        for index, map in enumerate(self.pixel_map2):
+            if (index % 2) == 0:
+                out1 = self.scolmap(data[map][0], data[map][1])
+            else:
+                out2 = self.scolmap(data[map][0], data[map][1])
+
+                if alpha:
+                    if send_status:
+                        self.midi.RawWrite(0x92, out1, out2)
+                        send_status = False
+                    else:
+                        self.midi.RawWriteTwo(out1, out2)
+                else:
+                    self.midi.RawWrite(0x92, out1, out2)
+
+        if self.buffer0:
+            # Display buffer 0, and write to buffer 1
+            self.midi.RawWrite(0xB0, 0x00, 0x24)
+        else:
+            # Display buffer 1, and write to buffer 0
+            self.midi.RawWrite(0xB0, 0x00, 0x21)
+
+        # and flip buffers
+        self.buffer0 = not self.buffer0
+
+        if diag:
+            now = timeit.default_timer()
+            nowint = int(now)
+            # if now just rolled over a second boundary
+            if nowint != self.lasttime:
+                self.fps = self.frame
+                self.frame = 0
+            else:
+                self.frame += 1
+            _LOGGER.info(f"Launchpad S flush {self.fps} : {now - start}")
+            self.lasttime = nowint

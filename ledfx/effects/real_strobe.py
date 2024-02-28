@@ -13,6 +13,7 @@ from ledfx.utils import empty_queue
 class Strobe(AudioReactiveEffect, GradientEffect):
     NAME = "Strobe"
     CATEGORY = "Classic"
+    HIDDEN_KEYS = ["gradient_roll"]
 
     CONFIG_SCHEMA = vol.Schema(
         {
@@ -101,9 +102,9 @@ class Strobe(AudioReactiveEffect, GradientEffect):
                 if length_diff == 0
                 else np.random.randint(self.pixel_count - strobe_width)
             )
-            self.strobe_overlay[
-                position : position + strobe_width
-            ] = self.strobe_color
+            self.strobe_overlay[position : position + strobe_width] = (
+                self.strobe_color
+            )
 
         pixels += self.strobe_overlay
 

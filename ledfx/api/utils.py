@@ -1,4 +1,5 @@
 """Module to convert voluptuous schemas to dictionaries."""
+
 import collections
 
 import voluptuous as vol
@@ -17,10 +18,25 @@ TYPES_MAP = {
 }
 
 PERMITTED_KEYS = {
-    "audio": ("min_volume", "audio_device", "delay_ms"),
+    "audio": (
+        "min_volume",
+        "audio_device",
+        "delay_ms",
+        "pitch_method",
+        "onset_method",
+        "pitch_tolerance",
+    ),
     "melbanks": (
         "max_frequencies",
         "min_frequency",
+        "peak_isolation",
+        "coeffs_type",
+        "samples",
+    ),
+    "melbank_collection": (
+        "name",
+        "min_frequency",
+        "max_frequency",
     ),
     "wled_preferences": tuple(_default_wled_settings.keys()),
     "core": (
@@ -32,8 +48,10 @@ PERMITTED_KEYS = {
         "create_segments",
         "visualisation_fps",
         "visualisation_maxlen",
+        "transmission_mode",
         "global_transitions",
         "global_brightness",
+        "melbank_collection",
     ),
 }
 

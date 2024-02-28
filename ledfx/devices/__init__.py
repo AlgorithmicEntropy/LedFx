@@ -8,10 +8,14 @@ import numpy as np
 import serial
 import serial.tools.list_ports
 import voluptuous as vol
-import zeroconf
 
 from ledfx.config import save_config
-from ledfx.events import DeviceCreatedEvent, DeviceUpdateEvent, Event
+from ledfx.events import (
+    DeviceCreatedEvent,
+    DevicesUpdatedEvent,
+    DeviceUpdateEvent,
+    Event,
+)
 from ledfx.utils import (
     AVAILABLE_FPS,
     WLED,
@@ -182,6 +186,11 @@ class Device(BaseRegistry):
         self._active = False
         # self.flush(np.zeros((self.pixel_count, 3)))
 
+    def set_offline(self):
+        self.deactivate()
+        self._online = False
+        self._ledfx.events.fire_event(DevicesUpdatedEvent(self.id))
+
     @abstractmethod
     def flush(self, data):
         """
@@ -242,9 +251,7 @@ class Device(BaseRegistry):
     @property
     def online(self):
         """
-        list of id of the virtuals active on this device.
-        it's a list bc there can be more than one virtual streaming
-        to a device.
+        bool indicator of online status
         """
         return self._online
 
@@ -558,13 +565,13 @@ class SerialDevice(Device):
             self.serial = serial.Serial(self.com_port, self.baudrate)
             if self.serial.isOpen:
                 super().activate()
+                self._online = True
 
         except serial.SerialException:
-            _LOGGER.critical(
+            _LOGGER.warning(
                 "Serial Error: Please ensure your device is connected, functioning and the correct COM port is selected."
             )
-            # Todo: Trigger the UI to refresh after the clear effect call. Currently it still shows as active.
-            self.deactivate()
+            self.set_offline()
 
     def deactivate(self):
         super().deactivate()
@@ -581,11 +588,9 @@ class Devices(RegistryLoader):
         super().__init__(ledfx, Device, self.PACKAGE_NAME)
 
         def on_shutdown(e):
-            self._zeroconf.close()
             self.deactivate_devices()
 
         self._ledfx.events.add_listener(on_shutdown, Event.LEDFX_SHUTDOWN)
-        self._zeroconf = zeroconf.Zeroconf()
 
     def create_from_config(self, config):
         for device in config:
@@ -636,7 +641,7 @@ class Devices(RegistryLoader):
                     self._ledfx.loop, self._ledfx.thread_executor, device_ip
                 )
             except ValueError:
-                _LOGGER.error(f"Discarding device {device_ip}")
+                _LOGGER.warning(f"Discarding device {device_ip}")
                 return
 
             for existing_device in self._ledfx.devices.values():
@@ -725,9 +730,7 @@ class Devices(RegistryLoader):
 
         # Create the device
         _LOGGER.info(
-            "Adding device of type {} with config {}".format(
-                device_type, device_config
-            )
+            f"Adding device of type {device_type} with config {device_config}"
         )
         device = self._ledfx.devices.create(
             id=device_id,
@@ -758,6 +761,12 @@ class Devices(RegistryLoader):
             "name": device.name,
             "icon_name": device_config["icon_name"],
         }
+
+        if device_type == "wled":
+            if "matrix" in led_info.keys():
+                if "h" in led_info["matrix"].keys():
+                    virtual_config["rows"] = led_info["matrix"]["h"]
+
         segments = [[device.id, 0, device_config["pixel_count"] - 1, False]]
 
         # Create the virtual
@@ -803,49 +812,3 @@ class Devices(RegistryLoader):
                 device.wled.set_sync_mode(mode)
                 await device.wled.flush_sync_settings()
                 device.update_config({"sync_mode": mode})
-
-    async def find_wled_devices(self):
-        # Scan the LAN network that match WLED using zeroconf - Multicast DNS
-        # Service Discovery Library
-        _LOGGER.info("Scanning for WLED devices...")
-        wled_listener = WLEDListener(self._ledfx)
-        wledbrowser = self._zeroconf.add_service_listener(
-            "_wled._tcp.local.", wled_listener
-        )
-        try:
-            await asyncio.sleep(30)
-        finally:
-            _LOGGER.info("Scan Finished")
-            self._zeroconf.remove_service_listener(wled_listener)
-
-
-class WLEDListener(zeroconf.ServiceBrowser):
-    def __init__(self, _ledfx):
-        self._ledfx = _ledfx
-
-    def remove_service(self, zeroconf_obj, type, name):
-        _LOGGER.info(f"Service {name} removed")
-
-    def add_service(self, zeroconf_obj, type, name):
-        info = zeroconf_obj.get_service_info(type, name)
-
-        if info:
-            hostname = str(info.server).rstrip(".")
-            _LOGGER.info(f"Found device: {hostname}")
-
-            device_type = "wled"
-            device_config = {"ip_address": hostname}
-
-            def handle_exception(future):
-                # Ignore exceptions, these will be raised when a device is found that already exists
-                exc = future.exception()
-
-            async_fire_and_forget(
-                self._ledfx.devices.add_new_device(device_type, device_config),
-                loop=self._ledfx.loop,
-                exc_handler=handle_exception,
-            )
-
-    def update_service(self, zeroconf_obj, type, name):
-        """Callback when a service is updated."""
-        pass

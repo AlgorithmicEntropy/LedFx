@@ -7,14 +7,15 @@
 
 # -- Path setup --------------------------------------------------------------
 
+import datetime
 import os
+import sys
+
+import sphinx_rtd_theme
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-import sys
-
-import sphinx_rtd_theme
 
 sys.path.insert(0, os.path.abspath(".."))
 
@@ -25,7 +26,7 @@ from ledfx.consts import PROJECT_AUTHOR, PROJECT_NAME, PROJECT_VERSION
 
 PROJECT_PACKAGE_NAME = PROJECT_NAME
 PROJECT_AUTHOR = PROJECT_AUTHOR
-PROJECT_COPYRIGHT = f" 2018-2023, {PROJECT_AUTHOR}"
+PROJECT_COPYRIGHT = f" 2018-{datetime.datetime.now().year}, {PROJECT_AUTHOR}"
 PROJECT_SHORT_DESCRIPTION = "LedFx is an open-source effect controller"
 PROJECT_LONG_DESCRIPTION = (
     "LedFx is an open-source effect controller "
@@ -59,13 +60,16 @@ extensions = [
     "sphinxcontrib.httpdomain",
     "sphinx_rtd_theme",
     "sphinx_toolbox.collapse",
+    "sphinx_copybutton",
+    "myst_parser",
 ]
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
-#
-# source_suffix = ['.rst', '.md']
-source_suffix = ".rst"
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}
 
 # The master toctree document.
 master_doc = "index"
@@ -98,7 +102,6 @@ linkcheck_timeout = 2
 # a list of builtin themes.
 #
 html_theme = "sphinx_rtd_theme"
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 
 
 def setup(app):
@@ -223,3 +226,21 @@ texinfo_documents = [
 
 
 # -- Extension configuration -------------------------------------------------
+
+# -- Options for myst_parser -------------------------------------------------
+
+myst_enable_extensions = [
+    "dollarmath",
+    "amsmath",
+    "deflist",
+    "html_admonition",
+    "html_image",
+    "colon_fence",
+    "smartquotes",
+    "replacements",
+    "linkify",
+    "substitution",
+    "tasklist",
+]
+
+myst_heading_anchors = 3

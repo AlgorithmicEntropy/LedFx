@@ -2,10 +2,11 @@ import subprocess
 import time
 
 import pytest
-from test_definitions.all_effects import get_ledfx_effects
-from test_utilities.test_utils import EnvironmentCleanup
 
+from tests.test_definitions.all_effects import get_ledfx_effects
+from tests.test_definitions.audio_configs import get_ledfx_audio_configs
 from tests.test_utilities.consts import BASE_PORT
+from tests.test_utilities.test_utils import EnvironmentCleanup
 
 
 def pytest_sessionstart(session):
@@ -26,7 +27,7 @@ def pytest_sessionstart(session):
     try:
         ledfx = subprocess.Popen(
             [
-                "poetry",
+                "uv",
                 "run",
                 "ledfx",
                 "-p",
@@ -51,6 +52,8 @@ def pytest_sessionstart(session):
     # This is a hack to get around the fact that pytest doesn't support dynamic imports
     global all_effects
     all_effects = get_ledfx_effects()
+    global audio_configs
+    audio_configs = get_ledfx_audio_configs()
     # To add another test group, add it here, and then in test_apis.py
 
 
@@ -71,5 +74,5 @@ def pytest_sessionfinish(session, exitstatus):
     except Exception as e:
         pytest.fail(f"An error occurred while shutting down LedFx: {str(e)}")
     # Wait for LedFx to terminate
-    while ledfx.poll() is not None:
+    while ledfx.poll() is None:
         time.sleep(0.5)

@@ -3,7 +3,25 @@
   "extends": [
     "config:recommended",
     ":automergeMinor",
-    ":automergeLinters",
-    ":automergeBranch"
-]
+    ":automergeLinters"
+  ],
+  "packageRules": [
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "schedule": [
+        "every month"
+      ]
+    },
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "schedule": [
+        "every weekend"
+      ]
+    }
+  ]
 }

@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 """
 Entry point for LedFx.
-To run this script for development purposes use:
 
-    poetry install
-    poetry run ledfx
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
+WARNING                                                         WARNING
+WARNING  ⚠️⚠️⚠️ DO NOT USE SOUNDDEVICE WITHIN MAIN.PY ⚠️⚠️⚠️ WARNING
+WARNING                                                         WARNING
+WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
 
 """
 
@@ -96,6 +98,7 @@ def setup_logging(loglevel, config_dir):
     logging.getLogger("sacn").setLevel(logging.WARNING)
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
     logging.getLogger("zeroconf").setLevel(logging.WARNING)
+    logging.getLogger("lifxdev").setLevel(logging.WARNING)
 
     global _LOGGER
     _LOGGER = logging.getLogger(__name__)
@@ -214,11 +217,20 @@ def parse_args():
         help="Launch LedFx, load the config, clear all active effects on all virtuals. Effect configurations are persisted, just turned off",
     )
 
+    parser.add_argument(
+        "--pause-all",
+        dest="pause_all",
+        action="store_true",
+        help="Start Ledfx with all virtuals paused",
+    )
+
     return parser.parse_args()
 
 
 def main():
-    """Main entry point allowing external calls"""
+    """
+    Main entry point allowing external calls
+    """
 
     args = parse_args()
     config_helpers.ensure_config_directory(args.config)
@@ -231,7 +243,6 @@ def main():
     # Set some process priority optimisations
     if have_psutil:
         p = psutil.Process(os.getpid())
-
         if psutil.WINDOWS:
             try:
                 p.nice(psutil.HIGH_PRIORITY_CLASS)
@@ -246,7 +257,7 @@ def main():
                 p.ionice(psutil.IOPRIO_CLASS_RT, value=7)
             except psutil.Error:
                 _LOGGER.info(
-                    "Unable to set priority, please run as root or sudo if you are experiencing frame rate issues",
+                    "Unable to set priority, please run as root or use sudo if you are experiencing frame rate issues",
                 )
         else:
             p.nice(15)
@@ -255,8 +266,7 @@ def main():
         setup_sentry()
 
     if args.sentry_test:
-        """This will crash LedFx and submit a Sentry error if Sentry is configured"""
-        _LOGGER.warning("Steering LedFx into a brick wall")
+        _LOGGER.warning("Steering LedFx into a brick wall.")
         div_by_zero = 1 / 0
 
     if (args.tray or currently_frozen()) and not args.no_tray:
@@ -264,9 +274,10 @@ def main():
         try:
             import pystray
         except Exception as Error:
-            msg = f"Error: Unable to virtual tray icon. Shutting down. Error: {Error}"
+            msg = f"Unable to create tray icon. Error: {Error}. Try launching LedFx via --no-tray option."
             _LOGGER.critical(msg)
-            sys.exit(0)
+            # Exit with code 3 to indicate that there was an error creating the tray icon.
+            sys.exit(3)
 
         from PIL import Image
 
@@ -307,7 +318,7 @@ def entry_point(icon=None):
             offline_mode=args.offline_mode,
         )
 
-        exit_code = ledfx.start(open_ui=args.open_ui)
+        exit_code = ledfx.start(open_ui=args.open_ui, pause_all=args.pause_all)
 
     if icon:
         icon.stop()

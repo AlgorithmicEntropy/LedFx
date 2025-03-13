@@ -128,6 +128,7 @@ class LaunchpadDevice(MidiDevice):
         super().__init__(ledfx, config)
         self.lp = None
         self.lp_name = "unknown"
+        self._device_type = "Launchpad"
         _LOGGER.info("Launchpad device created")
 
     def flush(self, data):
@@ -151,21 +152,32 @@ class LaunchpadDevice(MidiDevice):
                     "Launchpad variant not supported or not connected"
                 )
                 self.set_offline()
+        else:
+            self.set_offline()
 
     def set_class(self):
         self.lp = launchpad.Launchpad()
         self.lp_name = self.validate_launchpad()
-        _LOGGER.info(
-            f"Launchpad {self.lp_name} device class: {self.lp.__class__.__name__}"
-        )
+
+        if self.lp_name is None:
+            _LOGGER.warning(
+                f"Launchpad validation failed class: {self.lp.__class__.__name__}"
+            )
+            self.lp = None
+        else:
+            _LOGGER.info(
+                f"Launchpad {self.lp_name} device class: {self.lp.__class__.__name__}"
+            )
 
     def deactivate(self):
+        _LOGGER.info("Deactivating Launchpad")
         if self.lp is not None:
             self.lp.flush(
                 zeros((self.pixel_count, 3)),
                 self._config["alpha_options"],
                 self._config["diag"],
             )
+            _LOGGER.info("Closing Launchpad")
             self.lp.Close()
             self.lp = None
         super().deactivate()

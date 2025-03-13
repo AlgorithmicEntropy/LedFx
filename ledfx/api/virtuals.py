@@ -4,8 +4,8 @@ from json import JSONDecodeError
 from aiohttp import web
 
 from ledfx.api import RestEndpoint
+from ledfx.api.virtual import make_virtual_response
 from ledfx.config import save_config
-from ledfx.effects import DummyEffect
 from ledfx.utils import generate_id
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,31 +26,13 @@ class VirtualsEndpoint(RestEndpoint):
         response = {"status": "success", "virtuals": {}}
         response["paused"] = self._ledfx.virtuals._paused
         for virtual in self._ledfx.virtuals.values():
-            response["virtuals"][virtual.id] = {
-                "config": virtual.config,
-                "id": virtual.id,
-                "is_device": virtual.is_device,
-                "auto_generated": virtual.auto_generated,
-                "segments": virtual.segments,
-                "pixel_count": virtual.pixel_count,
-                "active": virtual.active,
-                "effect": {},
-            }
-            # Protect from DummyEffect
-            if virtual.active_effect and not isinstance(
-                virtual.active_effect, DummyEffect
-            ):
-                effect_response = {}
-                effect_response["config"] = virtual.active_effect.config
-                effect_response["name"] = virtual.active_effect.name
-                effect_response["type"] = virtual.active_effect.type
-                response["virtuals"][virtual.id]["effect"] = effect_response
+            response["virtuals"][virtual.id] = make_virtual_response(virtual)
 
         return web.json_response(data=response, status=200)
 
     async def put(self) -> web.Response:
         """
-        Get info of all virtuals
+        Toggles a global pause on all virtuals
 
         Returns:
             web.Response: The response containing the paused virtuals.
@@ -71,7 +53,7 @@ class VirtualsEndpoint(RestEndpoint):
             request (web.Request): The request object containing the virtual `config` dict.
 
         Returns:
-            web.Response: The response indicating the success or failure of the deletion.
+            web.Response: The response indicating the success or failure of the creation.
         """
         try:
             data = await request.json()
@@ -98,12 +80,9 @@ class VirtualsEndpoint(RestEndpoint):
             _LOGGER.info(
                 f"Updated virtual {virtual.id} config to {virtual_config}"
             )
-            # Update ledfx's config
-            for idx, item in enumerate(self._ledfx.config["virtuals"]):
-                if item["id"] == virtual.id:
-                    item["config"] = virtual.config
-                    self._ledfx.config["virtuals"][idx] = item
-                    break
+
+            virtual.virtual_cfg["config"] = virtual.config
+
             response = {
                 "status": "success",
                 "payload": {
@@ -141,11 +120,13 @@ class VirtualsEndpoint(RestEndpoint):
                 }
             )
 
+            virtual.virtual_cfg = self._ledfx.config["virtuals"][-1]
+
             response = {
                 "status": "success",
                 "payload": {
                     "type": "success",
-                    "reason": f"Created Virtual {virtual_id}",
+                    "reason": f"Created Virtual {virtual.id}",
                 },
                 "virtual": {
                     "config": virtual.config,

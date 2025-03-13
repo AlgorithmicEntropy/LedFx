@@ -7,9 +7,36 @@ from aiohttp import web
 
 from ledfx.api import RestEndpoint
 from ledfx.config import save_config
-from ledfx.virtuals import update_effect_config
+from ledfx.effects import DummyEffect
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def process_fallback(fallback):
+    """converts the fallback param to a sanitized value
+
+    Args:
+        fallback (None, Bool, float, int): Fallback behaviour
+            - None: No fallback
+            - Bool: True uses a default fallback time, False no fallback
+            - float/int: fallback time in seconds
+
+    Returns:
+        float:None: Sanitized falback time or None
+    """
+    if isinstance(fallback, bool):
+        if fallback is False:
+            fallback = None
+        elif fallback is True:
+            # set up a long default time for fallback, this is to prevent
+            # getting stuck in a temporary effect if the caller forgets to
+            # set a time and the effect has not self triggered exit
+            fallback = 300.0
+    elif isinstance(fallback, (int, float)) and fallback > 0:
+        pass
+    else:
+        fallback = None
+    return fallback
 
 
 class EffectsEndpoint(RestEndpoint):
@@ -32,14 +59,20 @@ class EffectsEndpoint(RestEndpoint):
                 f"Virtual with ID {virtual_id} not found"
             )
 
-        # Get the active effect
-        response = {"effect": {}}
-        if virtual.active_effect:
-            effect_response = {}
-            effect_response["config"] = virtual.active_effect.config
-            effect_response["name"] = virtual.active_effect.name
-            effect_response["type"] = virtual.active_effect.type
-            response = {"effect": effect_response}
+        # Protect from DummyEffect
+        if virtual.active_effect and not isinstance(
+            virtual.active_effect, DummyEffect
+        ):
+            response = {
+                "effect": {
+                    "config": virtual.active_effect.config,
+                    "name": virtual.active_effect.name,
+                    "type": virtual.active_effect.type,
+                }
+            }
+        else:
+            response = {"effect": {}}
+
         return await self.bare_request_success(response)
 
     async def put(self, virtual_id, request) -> web.Response:
@@ -108,6 +141,17 @@ class EffectsEndpoint(RestEndpoint):
                         val = random.randint(lower, upper)
                 effect_config[setting.schema] = val
 
+        fallback = process_fallback(data.get("fallback", None))
+
+        if fallback is not None and virtual.streaming:
+            error_message = (
+                f"Unable to set effect: Virtual {virtual_id} being streamed to"
+            )
+            _LOGGER.warning(error_message)
+            return await self.invalid_request(
+                error_message, "error", resp_code=409
+            )
+
         # See if virtual's active effect type matches this effect type,
         # if so update the effect config
         # otherwise, create a new effect and add it to the virtual
@@ -133,7 +177,7 @@ class EffectsEndpoint(RestEndpoint):
                             **effect_config,
                         },
                     )
-                    virtual.set_effect(effect)
+                    virtual.set_effect(effect, fallback=fallback)
                 else:
                     effect = virtual.active_effect
                     virtual.active_effect.update_config(effect_config)
@@ -143,14 +187,14 @@ class EffectsEndpoint(RestEndpoint):
                 effect = self._ledfx.effects.create(
                     ledfx=self._ledfx, type=effect_type, config=effect_config
                 )
-                virtual.set_effect(effect)
+                virtual.set_effect(effect, fallback=fallback)
 
         except (ValueError, RuntimeError) as msg:
             error_message = f"Unable to set effect: {msg}"
             _LOGGER.warning(error_message)
             return await self.internal_error(error_message, "warning")
 
-        update_effect_config(self._ledfx.config, virtual_id, effect)
+        virtual.update_effect_config(effect)
 
         save_config(
             config=self._ledfx.config,
@@ -189,24 +233,12 @@ class EffectsEndpoint(RestEndpoint):
         effect_type = data.get("type")
         if effect_type is None:
             return await self.invalid_request(
-                'Required attribute "type" was not provided'
+                "Required attribute 'type' was not provided"
             )
 
         effect_config = data.get("config")
         if effect_config is None:
-            effect_config = {}
-            # if we already have this effect in effects then load it up
-            virt_cfg = next(
-                (
-                    item
-                    for item in self._ledfx.config["virtuals"]
-                    if item["id"] == virtual_id
-                ),
-                None,
-            )
-            if virt_cfg and "effects" in virt_cfg:
-                if effect_type in virt_cfg["effects"]:
-                    effect_config = virt_cfg["effects"][effect_type]["config"]
+            effect_config = virtual.get_effects_config(effect_type)
         elif effect_config == "RANDOMIZE":
             # Parse and break down schema for effect, in order to generate
             # acceptable random values
@@ -250,8 +282,18 @@ class EffectsEndpoint(RestEndpoint):
         effect = self._ledfx.effects.create(
             ledfx=self._ledfx, type=effect_type, config=effect_config
         )
+
+        fallback = process_fallback(data.get("fallback", None))
+
+        if fallback is not None and virtual.streaming:
+            error_message = f"Unable to set effect: Virtual {virtual_id} is being streamed to"
+            _LOGGER.warning(error_message)
+            return await self.invalid_request(
+                error_message, "error", resp_code=409
+            )
+
         try:
-            virtual.set_effect(effect)
+            virtual.set_effect(effect, fallback=fallback)
         except (ValueError, RuntimeError) as msg:
             error_message = (
                 f"Unable to set effect {effect} on {virtual_id}: {msg}"
@@ -259,7 +301,7 @@ class EffectsEndpoint(RestEndpoint):
             _LOGGER.warning(error_message)
             return await self.internal_error(error_message, "error")
 
-        update_effect_config(self._ledfx.config, virtual_id, effect)
+        virtual.update_effect_config(effect)
 
         save_config(
             config=self._ledfx.config,
@@ -290,14 +332,10 @@ class EffectsEndpoint(RestEndpoint):
                 f"Virtual with ID {virtual_id} not found"
             )
 
-        # Clear the effect
         virtual.clear_effect()
 
-        for virtual in self._ledfx.config["virtuals"]:
-            if virtual["id"] == virtual_id:
-                if "effect" in virtual:
-                    del virtual["effect"]
-                    break
+        virtual.virtual_cfg.pop("effect", None)
+
         save_config(
             config=self._ledfx.config,
             config_dir=self._ledfx.config_dir,

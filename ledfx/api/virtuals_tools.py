@@ -6,7 +6,6 @@ from aiohttp import web
 from ledfx.api import RestEndpoint
 from ledfx.color import parse_color, validate_color
 from ledfx.config import save_config
-from ledfx.virtuals import update_effect_config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -102,20 +101,14 @@ class VirtualsToolsEndpoint(RestEndpoint):
                 )
 
         if tool == "oneshot":
-            color = data.get("color")
-            if color is None:
-                return await self.invalid_request(
-                    "Required attribute for oneshot, color was not provided"
-                )
+            color = data.get("color", "white")
 
             ramp = data.get("ramp", 0)
             hold = data.get("hold", 0)
             fade = data.get("fade", 0)
 
-            if sum(ramp, hold, fade) == 0:
-                return await self.invalid_request(
-                    "At least one of ramp, hold or fade must be greater than 0"
-                )
+            # if all values are zero, we will now just ensure any current
+            # oneshot are cancelled
 
             result = virtual.oneshot(
                 parse_color(validate_color(color)), ramp, hold, fade
@@ -158,9 +151,7 @@ class VirtualsToolsEndpoint(RestEndpoint):
                 except (ValueError, RuntimeError) as msg:
                     continue
 
-                update_effect_config(
-                    self._ledfx.config, dest_virtual_id, effect
-                )
+                dest_virtual.update_effect_config(effect)
                 updated += 1
 
             if updated > 0:

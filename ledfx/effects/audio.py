@@ -25,7 +25,7 @@ MAX_MIDI = 108
 
 
 class AudioInputSource:
-    _is_activated = False
+    _audio_stream_active = False
     _audio = None
     _stream = None
     _callbacks = []
@@ -54,6 +54,13 @@ class AudioInputSource:
         return tuple(AudioInputSource.input_devices().keys())
 
     @staticmethod
+    def audio_input_device_exists():
+        """
+        Returns True if there are valid input devices
+        """
+        return len(AudioInputSource.valid_device_indexes()) > 0
+
+    @staticmethod
     def default_device_index():
         """
         Finds the WASAPI loopback device index of the default output device if it exists
@@ -62,18 +69,52 @@ class AudioInputSource:
             integer: the sounddevice device index to use for audio input
         """
         device_list = sd.query_devices()
-        default_output_device = sd.default.device["output"]
-        # target device should be the name of the default_output device plus " [Loopback]"
-        target_device = (
-            f"{device_list[default_output_device]['name']} [Loopback]"
-        )
-        # We need to run over the device list looking for the target device
-        for device_index, device in enumerate(device_list):
-            if device["name"] == target_device:
-                # Return the loopback device index
-                return device_index
-        # No Loopback device matching output found - return the default input device index
-        return sd.default.device["input"]
+        default_output_device_idx = sd.default.device["output"]
+        default_input_device_idx = sd.default.device["input"]
+        if len(device_list) == 0 or default_output_device_idx == -1:
+            _LOGGER.warning("No audio output devices found.")
+        else:
+            default_output_device_name = device_list[
+                default_output_device_idx
+            ]["name"]
+
+            # We need to run over the device list looking for the target devices name
+            _LOGGER.debug(
+                f"Looking for audio loopback device for default output device at index {default_output_device_idx}: {default_output_device_name}"
+            )
+            for device_index, device in enumerate(device_list):
+                # sometimes the audio device name string is truncated, so we need to match what we have and Loopback but otherwise be sloppy
+                if (
+                    default_output_device_name in device["name"]
+                    and "[Loopback]" in device["name"]
+                ):
+                    # Return the loopback device index
+                    _LOGGER.debug(
+                        f"Found audio loopback device for default output device at index {device_index}: {device['name']}"
+                    )
+                    return device_index
+
+        # The default input device index is not always valid (i.e no default input devices)
+        valid_device_indexes = AudioInputSource.valid_device_indexes()
+        if len(valid_device_indexes) == 0:
+            _LOGGER.warning(
+                "No valid audio input devices found. Unable to use audio reactive effects."
+            )
+            return None
+        else:
+            if default_input_device_idx in valid_device_indexes:
+                _LOGGER.debug(
+                    f"No audio loopback device found for default output device. Using default input device at index {default_input_device_idx}: {device_list[default_input_device_idx]['name']}"
+                )
+                return default_input_device_idx
+            else:
+                # Return the first valid input device index if we can't find a valid default input device
+                if len(valid_device_indexes) > 0:
+                    first_valid_idx = next(iter(valid_device_indexes))
+                    _LOGGER.debug(
+                        f"No valid default audio input device found. Using first valid input device at index {first_valid_idx}: {device_list[first_valid_idx]['name']}"
+                    )
+                    return first_valid_idx
 
     @staticmethod
     def query_hostapis():
@@ -118,7 +159,7 @@ class AudioInputSource:
                 vol.Optional("mic_rate", default=44100): int,
                 vol.Optional("fft_size", default=FFT_SIZE): int,
                 vol.Optional("min_volume", default=0.2): vol.All(
-                    vol.Coerce(float), vol.Range(min=0.0, max=10.0)
+                    vol.Coerce(float), vol.Range(min=0.0, max=1.0)
                 ),
                 vol.Optional(
                     "audio_device", default=default_device_index
@@ -135,6 +176,8 @@ class AudioInputSource:
     def __init__(self, ledfx, config):
         self._ledfx = ledfx
         self.lock = threading.Lock()
+        # We must not inherit legacy _callbacks from prior instances
+        self._callbacks = []
         self.update_config(config)
 
         def shutdown_event(e):
@@ -152,7 +195,7 @@ class AudioInputSource:
         if hasattr(self, "_config"):
             old_input_device = self._config["audio_device"]
 
-        if self._is_activated:
+        if self._audio_stream_active:
             self.deactivate()
         self._config = self.AUDIO_CONFIG_SCHEMA.fget()(config)
         if len(self._callbacks) != 0:
@@ -179,20 +222,43 @@ class AudioInputSource:
         # Enumerate all of the input devices and find the one matching the
         # configured host api and device name
         input_devices = self.query_devices()
+
         hostapis = self.query_hostapis()
         default_device = self.default_device_index()
+        if default_device is None:
+            # There are no valid audio input devices, so we can't activate the audio source.
+            # We should never get here, as we check for devices on start-up.
+            # This likely just captures if a device is removed after start-up.
+            _LOGGER.warning(
+                "Audio input device not found. Unable to activate audio source. Deactivating."
+            )
+            self.deactivate()
+            return
         valid_device_indexes = self.valid_device_indexes()
+        _LOGGER.debug("********************************************")
+        _LOGGER.debug("Valid audio input devices:")
+        for index in valid_device_indexes:
+            hostapi_name = hostapis[input_devices[index]["hostapi"]]["name"]
+            device_name = input_devices[index]["name"]
+            input_channels = input_devices[index]["max_input_channels"]
+            _LOGGER.debug(
+                f"Audio Device {index}\t{hostapi_name}\t{device_name}\tinput_channels: {input_channels}"
+            )
+        _LOGGER.debug("********************************************")
         device_idx = self._config["audio_device"]
+        _LOGGER.debug(
+            f"default_device: {default_device} config_device: {device_idx}"
+        )
 
         if device_idx > max(valid_device_indexes):
             _LOGGER.warning(
-                f"Invalid audio device index: {device_idx}. Reverting to default input device."
+                f"Audio device out of range: {device_idx}. Reverting to default input device: {default_device}"
             )
             device_idx = default_device
 
         elif device_idx not in valid_device_indexes:
             _LOGGER.warning(
-                f"Audio device {input_devices[device_idx]['name']} has no input channels. Reverting to default input device."
+                f"Audio device {input_devices[device_idx]['name']} not in valid_device_indexes. Reverting to default input device: {default_device}"
             )
             device_idx = default_device
 
@@ -245,11 +311,33 @@ class AudioInputSource:
             self.delay_queue = None
 
         def open_audio_stream(device_idx):
+            """
+            Opens an audio stream for the specified input device.
+            Parameters:
+            device_idx (int): The index of the input device to open the audio stream for.
+            Behavior:
+            - Detects if the device is a Windows WASAPI Loopback device and logs its name and channel count.
+            - If the device is a WEB AUDIO device, initializes a WebAudioStream and sets it as the active audio stream.
+            - For other devices, initializes an InputStream with the device's default sample rate and other parameters.
+            - Initializes a resampler with the "sinc_fastest" algorithm that downmixes the source to a single-channel.
+            - Logs the name of the opened audio source.
+            - Starts the audio stream and sets the audio stream active flag to True.
+            """
+
             device = input_devices[device_idx]
-            ch = 1
-            if hostapis[device["hostapi"]]["name"] == "Windows WASAPI":
-                if "Loopback" in device["name"]:
-                    ch = 2
+            channels = None
+            if (
+                hostapis[device["hostapi"]]["name"] == "Windows WASAPI"
+                and "Loopback" in device["name"]
+            ):
+                _LOGGER.info(
+                    f"Loopback device detected: {device['name']} with {device['max_input_channels']} channels"
+                )
+            else:
+                # if are not a windows loopback device, we will downmix to mono
+                # issue seen with poor audio behaviour on Mac and Linux
+                # this is similar to the long standing prior implementation
+                channels = 1
 
             if hostapis[device["hostapi"]]["name"] == "WEB AUDIO":
                 ledfx.api.websocket.ACTIVE_AUDIO_STREAM = self._stream = (
@@ -261,7 +349,6 @@ class AudioInputSource:
                 self._stream = self._audio.InputStream(
                     samplerate=int(device["default_samplerate"]),
                     device=device_idx,
-                    channels=ch,
                     callback=self._audio_sample_callback,
                     dtype=np.float32,
                     latency="low",
@@ -269,6 +356,8 @@ class AudioInputSource:
                         device["default_samplerate"]
                         / self._config["sample_rate"]
                     ),
+                    # only pass channels if we set it to something other than None
+                    **({"channels": channels} if channels is not None else {}),
                 )
 
             self.resampler = samplerate.Resampler("sinc_fastest", channels=1)
@@ -278,10 +367,10 @@ class AudioInputSource:
             )
 
             self._stream.start()
+            self._audio_stream_active = True
 
         try:
             open_audio_stream(device_idx)
-            self._is_activated = True
         except OSError as e:
             _LOGGER.critical(
                 f"Unable to open Audio Device: {e} - please retry."
@@ -297,13 +386,13 @@ class AudioInputSource:
                 self._stream.stop()
                 self._stream.close()
                 self._stream = None
-            self._is_activated = False
+            self._audio_stream_active = False
         _LOGGER.info("Audio source closed.")
 
     def subscribe(self, callback):
         """Registers a callback with the input source"""
         self._callbacks.append(callback)
-        if len(self._callbacks) > 0 and not self._is_activated:
+        if len(self._callbacks) > 0 and not self._audio_stream_active:
             self.activate()
         if self._timer is not None:
             self._timer.cancel()
@@ -315,7 +404,7 @@ class AudioInputSource:
             self._callbacks.remove(callback)
         if (
             len(self._callbacks) <= self._subscriber_threshold
-            and self._is_activated
+            and self._audio_stream_active
         ):
             if self._timer is not None:
                 self._timer.cancel()
@@ -328,7 +417,7 @@ class AudioInputSource:
         self._timer = None
         if (
             len(self._callbacks) <= self._subscriber_threshold
-            and self._is_activated
+            and self._audio_stream_active
         ):
             self.deactivate()
 
@@ -760,9 +849,8 @@ class AudioAnalysisSource(AudioInputSource):
             oscillator = (
                 1 - (self.beat_period - time_since_beat) / self.beat_period
             ) + self.beat_counter
-            # ensure it's between 0 and 1. useful when audio cuts
-            oscillator = min(4, oscillator)
-            oscillator = max(0, oscillator)
+            # ensure it's between [0 and 4). useful when audio cuts
+            oscillator = oscillator % 4
         return oscillator
 
     def beat_oscillator(self):

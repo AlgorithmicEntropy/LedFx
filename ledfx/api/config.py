@@ -16,7 +16,7 @@ from ledfx.config import (
     save_config,
 )
 from ledfx.consts import CONFIGURATION_VERSION
-from ledfx.effects.audio import AudioInputSource
+from ledfx.effects.audio import AudioAnalysisSource, AudioInputSource
 from ledfx.effects.melbank import Melbanks
 from ledfx.events import BaseConfigUpdateEvent
 
@@ -189,7 +189,6 @@ class ConfigEndpoint(RestEndpoint):
 
         try:
             self.update_config(config)
-            self._ledfx.events.fire_event(BaseConfigUpdateEvent(config))
             save_config(
                 config=self._ledfx.config, config_dir=self._ledfx.config_dir
             )
@@ -223,9 +222,17 @@ class ConfigEndpoint(RestEndpoint):
         Returns:
             None
         """
+        audio_config = config.pop("audio", {})
+
         audio_config = validate_and_trim_config(
-            config.pop("audio", {}),
+            audio_config,
             AudioInputSource.AUDIO_CONFIG_SCHEMA.fget(),
+            "audio",
+        )
+
+        audio_config = validate_and_trim_config(
+            audio_config,
+            AudioAnalysisSource.CONFIG_SCHEMA,
             "audio",
         )
         wled_config = validate_and_trim_config(
@@ -265,8 +272,7 @@ class ConfigEndpoint(RestEndpoint):
                 self._ledfx.config["melbanks"]
             )
 
-        if core_config:
-            self._ledfx.events.fire_event(BaseConfigUpdateEvent(config))
+        self._ledfx.events.fire_event(BaseConfigUpdateEvent(config))
 
     def check_need_restart(self, config):
         """

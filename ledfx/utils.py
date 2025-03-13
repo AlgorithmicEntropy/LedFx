@@ -6,6 +6,7 @@ import importlib
 import inspect
 import ipaddress
 import logging
+import math
 import os
 import pkgutil
 import re
@@ -40,6 +41,7 @@ import requests
 import voluptuous as vol
 from dotenv import load_dotenv
 
+from ledfx.color import LEDFX_GRADIENTS
 from ledfx.config import save_config
 from ledfx.consts import LEDFX_ASSETS_PATH, PROJECT_VERSION
 
@@ -340,8 +342,9 @@ class WLED:
         """
             Uses a JSON API call to determine if the device is WLED or WLED compatible
             and return its config.
-            Specifically searches for "WLED" in the brand json - currently all major
-            branches/forks of WLED contain WLED in the branch data.
+            As of WLED 0.15 brand is now being used to indicate specific variants of WLED
+            The brand field can no longer be depended on to indicate a compatible device
+            We now only check that brand exists as a field in the config
         Returns:
             config: dict, with all wled configuration info
         """
@@ -354,11 +357,14 @@ class WLED:
 
         wled_config = response.json()
 
-        if not wled_config["brand"] in "WLED":
-            msg = f"WLED {self.ip_address}: Not a compatible WLED brand '{wled_config['brand']}'"
-            raise ValueError(msg)
+        if "brand" not in wled_config:
+            raise ValueError(
+                f"WLED {self.ip_address}: Device is not WLED compatible"
+            )
 
-        _LOGGER.info(f"WLED {self.ip_address}: Received config")
+        _LOGGER.info(
+            f"WLED compatible device brand:{wled_config['brand']} at {self.ip_address} configuration received"
+        )
 
         return wled_config
 
@@ -707,7 +713,10 @@ def generate_id(name):
             str: The converted ID.
     """
     part1 = re.sub("[^a-zA-Z0-9]", " ", name).lower()
-    return re.sub(" +", " ", part1).strip().replace(" ", "-")
+    result = re.sub(" +", " ", part1).strip().replace(" ", "-")
+    if result == "":
+        result = "default"
+    return result
 
 
 def generate_title(id):
@@ -1409,6 +1418,13 @@ def extract_positive_integers(s):
     return list({int(num) for num in numbers if int(num) >= 0})
 
 
+def extract_uint8_seq(s):
+    # Use regular expression to find all sequences of digits
+    numbers = re.findall(r"\d+", s)
+    # discard anything outside of uint8 range
+    return [int(num) for num in numbers if 0 <= int(num) <= 255]
+
+
 def clip_at_limit(numbers, limit):
     # Keep only values that are less than the limit
     return [num for num in numbers if num < limit]
@@ -1420,7 +1436,8 @@ def open_gif(gif_path):
 
     Args:
         gif_path: str
-            path to gif file or url
+            path to gif, webp, png or jpg file or url
+            Can handle any image source that PIL is capable of, not just gif
     Returns:
         Image: PIL Image object or None if failed to open
     """
@@ -1429,13 +1446,17 @@ def open_gif(gif_path):
         if gif_path.startswith("http://") or gif_path.startswith("https://"):
             with urllib.request.urlopen(gif_path) as url:
                 gif = Image.open(url)
-                _LOGGER.debug("Remote GIF downloaded and opened.")
-                return gif
-
+                _LOGGER.debug("Remote image source downloaded and opened.")
         else:
             gif = Image.open(gif_path)  # Directly open for local files
-            _LOGGER.debug("Local GIF opened.")
-            return gif
+            _LOGGER.debug("Local image source opened.")
+
+        # protect against single frame image like png, jpg
+        if not hasattr(gif, "n_frames"):
+            gif.n_frames = 1
+
+        return gif
+
     except Exception as e:
         _LOGGER.warning(f"Failed to open gif : {gif_path} : {e}")
         return None
@@ -1518,7 +1539,18 @@ def get_font(font_list, size):
 
 
 def generate_default_config(ledfx_effects, effect_id):
-    return ledfx_effects.get_class(effect_id).get_combined_default_schema()
+    """
+    Generate config out of the schema for an effect to use as a defualt
+
+    Any manipulations must be made in here, such as expanding gradient strings to fully defined gradients
+    """
+    config = ledfx_effects.get_class(effect_id).get_combined_default_schema()
+    gradient = config.get("gradient", None)
+    gradient_str = LEDFX_GRADIENTS.get(gradient, None)
+    if gradient_str:
+        config["gradient"] = gradient_str
+        config["gradient_name"] = gradient
+    return config
 
 
 def inject_missing_default_keys(presets, defaults):
@@ -1742,7 +1774,7 @@ def is_snake_case(string) -> bool:
     Returns:
         bool: True if the string is in snake_case format, False otherwise.
     """
-    return re.match("^[a-z][a-z_]*[a-z]$", string) is not None
+    return re.match("^[a-z][a-z0-9_]*[a-z0-9]$", string) is not None
 
 
 class UpdateChecker:
@@ -1756,7 +1788,7 @@ class UpdateChecker:
     @staticmethod
     def get_release_information():
         try:
-            response = requests.get(UpdateChecker._update_url)
+            response = requests.get(UpdateChecker._update_url, timeout=0.5)
             response.raise_for_status()
             data = response.json()
             UpdateChecker._latest_version = data["tag_name"].replace("v", "")
@@ -1804,3 +1836,161 @@ class UpdateChecker:
         return UpdateChecker._get_attribute_if_update_succeeded(
             PROJECT_VERSION != UpdateChecker.get_latest_version()
         )
+
+
+# pre stuff this to prevent per frame
+log_256 = np.log(256)
+
+
+def pixels_boost(pixels, compression_factor, max_floor):
+    # Compute the new floor based on the compression factor
+    floor = max_floor * compression_factor
+
+    # Precompute constants and reduce repeated computations
+    factor = 255 - floor
+    blend_factor = 1 - compression_factor
+
+    # Logarithmic compression: map pixel_array from [0, 255] to [floor, 255]
+    log_compressed = floor + (np.log1p(pixels) / log_256) * factor
+
+    # Apply the blend only where pixels are greater than 1, else leave unchanged
+    boosted = np.where(
+        pixels > 1,
+        blend_factor * pixels + compression_factor * log_compressed,
+        pixels,
+    )
+
+    return boosted
+
+
+def dump_pixels(pixels, shape):
+    """
+    Dump a RGB pixels np array into a PIL image and launch a window to display it.
+    This is for adhoc debug only
+
+    Parameters:
+    - pixels: 1D array of concatenated RGB pixel values
+    - shape: tuple, the desired shape of the 2D image (height, width)
+
+    Returns:
+    - none
+    """
+
+    # Reshape the 1D pixel array into (height, width, 3) for RGB
+    reshaped_pixels = pixels.reshape((shape[0], shape[1], 3))
+    # Convert the numpy array back into a Pillow image
+    image = Image.fromarray(reshaped_pixels.astype(np.uint8), "RGB")
+
+    image.show()
+
+
+def resize_pixels(pixels, old_shape, new_shape):
+    """
+    Resizes a 1D pixel array that represents a for 1D or 2D image by interpolating it in 2D space using PIL.
+
+    Profiled as at least as good as or better than interpolate_pixels() for performance even with the overhead of creating a PIL image.
+
+    Parameters:
+    - pixels: 1D array of concatenated RGB pixel values
+    - old_shape: tuple, the original shape of the 2D image (height, width)
+    - new_shape: tuple, the desired shape of the resized 2D image (height, width)
+
+    Returns:
+    - A resized 1D pixel array
+    """
+    # Reshape the 1D array into a 2D image (height, width, 3)
+    pixel_matrix = pixels.reshape((old_shape[0], old_shape[1], 3)).astype(
+        np.uint8
+    )
+
+    # Create a PIL image from the pixel data
+    image = Image.fromarray(pixel_matrix)
+
+    # Resize the image using PIL (bilinear interpolation is default)
+    resized_image = image.resize((new_shape[1], new_shape[0]), Image.BILINEAR)
+
+    # Convert the resized image back to a numpy array
+    resized_pixel_matrix = np.array(resized_image)
+
+    # Flatten the resized pixel matrix back to 1D
+    return resized_pixel_matrix.reshape(-1, 3)
+
+
+def shape_to_fit_len(max_len, shape, pixels_len):
+    """Converts the shape of a visualisation to obey constraints
+       The max_len pixels which is a system variable a user can change
+       Additionally a max dimension of 64 in rows or columns is enforced
+       As the shape has already been reduced to max pixels, both CANNOT
+       be greate than 64
+
+    Args:
+        max_len : The maximum number of pixels allowed in the final visualisation
+        shape : The current shape of the visualisation before resizing
+        pixels_len : The number of pixels in the current visualisation
+
+    Returns:
+        new_shape : The shape calculated to use in resizing
+        pixels_len : The number of pixels implied in the new_shape
+    """
+
+    if shape[0] > 1:
+        # this is a 2d visualisation
+        pixels_len = shape[0] * shape[1]
+        reduction_ratio = math.sqrt(pixels_len / max_len)
+        new_rows = shape[0] / reduction_ratio
+        new_cols = shape[1] / reduction_ratio
+
+        # protect against extreme shapes
+        # see function description for magic number 64
+        if new_rows > 64:
+            reduction_ratio = 64 / new_rows
+            new_rows = 64
+            new_cols = new_cols * reduction_ratio
+        elif new_cols > 64:
+            reduction_ratio = 64 / new_cols
+            new_cols = 64
+            new_rows = new_rows * reduction_ratio
+
+        # protect from less than 1 values
+        if new_rows < 1.0:
+            new_shape = (1, new_cols)
+        elif new_cols < 1.0:
+            new_shape = (new_rows, 1)
+        else:
+            new_shape = (
+                int(new_rows),
+                int(new_cols),
+            )
+    else:
+        # this is a 1d visualisation
+        # pixels_len will be unchanged
+        new_shape = (1, max_len)
+
+    return new_shape, pixels_len
+
+
+class Teleplot:
+    """
+    Helper class for the use of vscode Teleplot extension
+
+    import and inline call
+    Teleplot.send("variable_name:value")
+    """
+
+    # only one socket for all instances
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    @staticmethod
+    def send(string):
+        """Send string to teleplot
+
+        https://github.com/nesnes/teleplot
+
+        Args:
+            string: The string carrying the teleplot data of the format as per link above
+        """
+
+        try:
+            Teleplot.sock.sendto(string.encode(), ("127.0.0.1", 47269))
+        except Exception as e:
+            _LOGGER.error(f"Failed to send data to teleplot: {e}")

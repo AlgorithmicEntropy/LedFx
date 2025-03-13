@@ -11,6 +11,33 @@ from ledfx.effects import DummyEffect
 _LOGGER = logging.getLogger(__name__)
 
 
+def make_virtual_response(virtual):
+    virtual_response = {
+        "config": virtual.config,
+        "id": virtual.id,
+        "is_device": virtual.is_device,
+        "auto_generated": virtual.auto_generated,
+        "segments": virtual.segments,
+        "pixel_count": virtual.pixel_count,
+        "active": virtual.active,
+        "streaming": virtual.streaming,
+        "last_effect": virtual.virtual_cfg.get("last_effect", None),
+        "effect": {},
+    }
+    # Protect from DummyEffect
+    if virtual.active_effect and not isinstance(
+        virtual.active_effect, DummyEffect
+    ):
+        effect_response = {
+            "config": virtual.active_effect.config,
+            "name": virtual.active_effect.name,
+            "type": virtual.active_effect.type,
+        }
+        virtual_response["effect"] = effect_response
+
+    return virtual_response
+
+
 class VirtualEndpoint(RestEndpoint):
     """REST end-point for querying and managing virtuals"""
 
@@ -27,25 +54,8 @@ class VirtualEndpoint(RestEndpoint):
             )
 
         response = {"status": "success"}
-        response[virtual.id] = {
-            "config": virtual.config,
-            "id": virtual.id,
-            "is_device": virtual.is_device,
-            "auto_generated": virtual.auto_generated,
-            "segments": virtual.segments,
-            "pixel_count": virtual.pixel_count,
-            "active": virtual.active,
-            "effect": {},
-        }
-        # Protect from DummyEffect
-        if virtual.active_effect and not isinstance(
-            virtual.active_effect, DummyEffect
-        ):
-            effect_response = {}
-            effect_response["config"] = virtual.active_effect.config
-            effect_response["name"] = virtual.active_effect.name
-            effect_response["type"] = virtual.active_effect.type
-            response[virtual.id]["effect"] = effect_response
+        response[virtual.id] = make_virtual_response(virtual)
+
         return await self.bare_request_success(response)
 
     async def put(self, virtual_id, request) -> web.Response:
@@ -69,6 +79,21 @@ class VirtualEndpoint(RestEndpoint):
             )
 
         # Update the virtual's configuration
+        if active:
+            if not virtual._active_effect or isinstance(
+                virtual.active_effect, DummyEffect
+            ):
+                last_effect = virtual.virtual_cfg.get("last_effect", None)
+                if last_effect:
+                    effect_config = virtual.get_effects_config(last_effect)
+                    if effect_config:
+                        effect = self._ledfx.effects.create(
+                            ledfx=self._ledfx,
+                            type=last_effect,
+                            config=effect_config,
+                        )
+                        virtual.set_effect(effect)
+                        virtual.update_effect_config(effect)
         try:
             virtual.active = active
         except ValueError as msg:
@@ -76,12 +101,7 @@ class VirtualEndpoint(RestEndpoint):
             _LOGGER.warning(error_message)
             return await self.internal_error(error_message, "error")
 
-        # Update ledfx's config
-        for idx, item in enumerate(self._ledfx.config["virtuals"]):
-            if item["id"] == virtual.id:
-                item["active"] = virtual.active
-                self._ledfx.config["virtuals"][idx] = item
-                break
+        virtual.virtual_cfg["active"] = virtual.active
 
         save_config(
             config=self._ledfx.config,
@@ -123,12 +143,7 @@ class VirtualEndpoint(RestEndpoint):
             virtual.update_segments(old_segments)
             return await self.internal_error(error_message, "error")
 
-        # Update ledfx's config
-        for idx, item in enumerate(self._ledfx.config["virtuals"]):
-            if item["id"] == virtual.id:
-                item["segments"] = virtual.segments
-                self._ledfx.config["virtuals"][idx] = item
-                break
+        virtual.virtual_cfg["segments"] = virtual.segments
 
         save_config(
             config=self._ledfx.config,

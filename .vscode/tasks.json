@@ -10,11 +10,80 @@
             "presentation": {
                 "reveal": "silent",
                 "focus": false,
-                "close": true,
+                "close": true
             },
             "windows": {
                 "command": "Remove-Item -Recurse -Force '${workspaceFolder}\\debug_config'"
             },
-        }
+            "options": {
+                "statusbar": {
+                    "hide": true
+                }
+            }
+        },
+        {
+            "label": "Build Docs",
+            "type": "shell",
+            "command": "uv",
+            "args": ["run", "sphinx-build","-a", "-b", "html", ".", "build"],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "options": {
+                "cwd": "${workspaceFolder}/docs",
+                "statusbar": {
+                    "hide": true
+                }
+            },
+            "problemMatcher": [],
+            "dependsOn": "Install Docs Dependencies"
+        },
+        {
+            "label": "Install Docs Dependencies",
+            "type": "shell",
+            "command": "uv",
+            "args": ["sync", "--group", "docs"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "statusbar": {
+                    "hide": true
+                }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build and Open Docs",
+            "type": "shell",
+            "command": "cmd",
+            "args": ["/c", "start", "${workspaceFolder}/docs/build/index.html"],
+            "windows": {
+                "command": "cmd",
+                "args": ["/c", "start", "${workspaceFolder}\\docs\\build\\index.html"]
+            },
+            "linux": {
+                "command": "xdg-open",
+                "args": ["${workspaceFolder}/docs/build/index.html"]
+            },
+            "osx": {
+                "command": "open",
+                "args": ["${workspaceFolder}/docs/build/index.html"]
+            },
+            "problemMatcher": [],
+            "dependsOn": "Build Docs"
+        },
+        {
+            "label": "Init Frontend submodule",
+            "type": "shell",
+            "command": "git",
+            "args": ["pull", "--recurse-submodules"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "statusbar": {
+                    "hide": true
+                }
+            },
+            "problemMatcher": []
+        },
     ]
 }
